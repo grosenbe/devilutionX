@@ -90,7 +90,6 @@ std::optional<CelSprite> talkButtons;
 std::optional<CelSprite> pDurIcons;
 std::optional<CelSprite> multiButtons;
 std::optional<CelSprite> pPanelButtons;
-std::optional<CelSprite> pChrPanel;
 std::optional<CelSprite> pGBoxBuff;
 std::optional<CelSprite> pSBkBtnCel;
 std::optional<CelSprite> pSBkIconCels;
@@ -108,19 +107,6 @@ int sgbPlrTalkTbl;
 bool WhisperList[MAX_PLRS];
 char panelstr[4][64];
 uint8_t SplTransTbl[256];
-
-/**
- * Line start position for info box text when displaying 1, 2, 3, 4 and 5 lines respectivly
- */
-const int LineOffsets[5][5] = {
-	{ 82 },
-	{ 70, 94 },
-	{ 64, 82, 100 },
-	{ 60, 75, 89, 104 },
-	{ 58, 70, 82, 94, 105 },
-};
-
-/* data */
 
 /** Maps from spell_id to spelicon.cel frame number. */
 char SpellITbl[] = {
@@ -230,7 +216,7 @@ spell_id SpellPages[6][7] = {
 #define SPLROWICONLS 10
 #define SPLICONLAST (gbIsHellfire ? 52 : 43)
 
-void CalculatePanelAreas(void)
+void CalculatePanelAreas()
 {
 	MainPanel = { { (gnScreenWidth - PANEL_WIDTH) / 2, gnScreenHeight - PANEL_HEIGHT }, { PANEL_WIDTH, PANEL_HEIGHT } };
 	LeftPanel = { { 0, 0 }, { SPANEL_WIDTH, SPANEL_HEIGHT } };
@@ -320,12 +306,12 @@ void SetSpellTrans(spell_type t)
 void PrintSBookHotkey(const Surface &out, Point position, const std::string &text)
 {
 	// Align the hot key text with the top-right corner of the spell icon
-	position += Displacement { SPLICONLENGTH - (GetLineWidth(text.c_str()) + 5), 17 - SPLICONLENGTH };
+	position += Displacement { SPLICONLENGTH - (GetLineWidth(text.c_str()) + 5), 5 - SPLICONLENGTH };
 
 	// Draw a drop shadow below and to the left of the text
 	DrawString(out, text, position + Displacement { -1, 1 }, UiFlags::ColorBlack);
 	// Then draw the text over the top
-	DrawString(out, text, position, UiFlags::ColorSilver);
+	DrawString(out, text, position, UiFlags::ColorWhite);
 }
 
 /**
@@ -412,19 +398,19 @@ void PrintInfo(const Surface &out)
 	if (talkflag)
 		return;
 
-	Rectangle line { { PANEL_X + 177, PANEL_Y + LineOffsets[pnumlines][0] }, { 288, 0 } };
+	const int LineStart[] = { 70, 58, 52, 48, 46 };
+	const int LineHeights[] = { 30, 24, 18, 15, 12 };
 
-	int yo = 0;
-	int lo = 1;
+	Rectangle line { { PANEL_X + 177, PANEL_Y + LineStart[pnumlines] }, { 288, 12 } };
+
 	if (infostr[0] != '\0') {
 		DrawString(out, infostr, line, InfoColor | UiFlags::AlignCenter | UiFlags::KerningFitSpacing, 2);
-		yo = 1;
-		lo = 0;
+		line.position.y += LineHeights[pnumlines];
 	}
 
 	for (int i = 0; i < pnumlines; i++) {
-		line.position.y = PANEL_Y + LineOffsets[pnumlines - lo][i + yo];
 		DrawString(out, panelstr[i], line, InfoColor | UiFlags::AlignCenter | UiFlags::KerningFitSpacing, 2);
+		line.position.y += LineHeights[pnumlines];
 	}
 }
 
@@ -471,7 +457,7 @@ int DrawDurIcon4Item(const Surface &out, Item &pItem, int x, int c)
 
 void PrintSBookStr(const Surface &out, Point position, const char *text)
 {
-	DrawString(out, text, { GetPanelPosition(UiPanels::Spell, { SPLICONLENGTH + position.x, position.y }), { 222, 0 } }, UiFlags::ColorSilver);
+	DrawString(out, text, { GetPanelPosition(UiPanels::Spell, { SPLICONLENGTH + position.x, position.y }), { 222, 0 } }, UiFlags::ColorWhite);
 }
 
 spell_type GetSBookTrans(spell_id ii, bool townok)
@@ -918,7 +904,6 @@ void InitControlPan()
 	pManaBuff.emplace(88, 88);
 	pLifeBuff.emplace(88, 88);
 
-	pChrPanel = LoadCel("Data\\Char.CEL", SPANEL_WIDTH);
 	if (!gbIsHellfire)
 		pSpellCels = LoadCel("CtrlPan\\SpelIcon.CEL", SPLICONLENGTH);
 	else
@@ -1156,13 +1141,13 @@ void CheckPanelInfo()
 				strcpy(tempstr, fmt::format(_("Hotkey: {:s}"), _(PanBtnHotKey[i])).c_str());
 				AddPanelString(tempstr);
 			}
-			InfoColor = UiFlags::ColorSilver;
+			InfoColor = UiFlags::ColorWhite;
 			panelflag = true;
 		}
 	}
 	if (!spselflag && MousePosition.x >= 565 + PANEL_LEFT && MousePosition.x < 621 + PANEL_LEFT && MousePosition.y >= 64 + PANEL_TOP && MousePosition.y < 120 + PANEL_TOP) {
 		strcpy(infostr, _("Select current spell button"));
-		InfoColor = UiFlags::ColorSilver;
+		InfoColor = UiFlags::ColorWhite;
 		panelflag = true;
 		strcpy(tempstr, _("Hotkey: 's'"));
 		AddPanelString(tempstr);
@@ -1301,7 +1286,6 @@ void FreeControlPan()
 	pBtmBuff = std::nullopt;
 	pManaBuff = std::nullopt;
 	pLifeBuff = std::nullopt;
-	pChrPanel = std::nullopt;
 	pSpellCels = std::nullopt;
 	pPanelButtons = std::nullopt;
 	multiButtons = std::nullopt;
@@ -1320,11 +1304,11 @@ void DrawInfoBox(const Surface &out)
 	DrawPanelBox(out, { 177, 62, 288, 60 }, { PANEL_X + 177, PANEL_Y + 46 });
 	if (!panelflag && !trigflag && pcursinvitem == -1 && !spselflag) {
 		infostr[0] = '\0';
-		InfoColor = UiFlags::ColorSilver;
+		InfoColor = UiFlags::ColorWhite;
 		ClearPanel();
 	}
 	if (spselflag || trigflag) {
-		InfoColor = UiFlags::ColorSilver;
+		InfoColor = UiFlags::ColorWhite;
 	} else if (pcurs >= CURSOR_FIRSTITEM) {
 		auto &myPlayer = Players[MyPlayerId];
 		if (myPlayer.HoldItem._itype == ITYPE_GOLD) {
@@ -1348,7 +1332,7 @@ void DrawInfoBox(const Surface &out)
 		if (pcursmonst != -1) {
 			const auto &monster = Monsters[pcursmonst];
 			if (leveltype != DTYPE_TOWN) {
-				InfoColor = UiFlags::ColorSilver;
+				InfoColor = UiFlags::ColorWhite;
 				strcpy(infostr, _(monster.mName));
 				ClearPanel();
 				if (monster._uniqtype != 0) {
@@ -1397,7 +1381,7 @@ void DrawLevelUpIcon(const Surface &out)
 {
 	if (stextflag == STORE_NONE) {
 		int nCel = lvlbtndown ? 3 : 2;
-		DrawString(out, _("Level Up"), { { PANEL_LEFT + 0, PANEL_TOP - 49 }, { 120, 0 } }, UiFlags::ColorSilver | UiFlags::AlignCenter);
+		DrawString(out, _("Level Up"), { { PANEL_LEFT + 0, PANEL_TOP - 62 }, { 120, 0 } }, UiFlags::ColorWhite | UiFlags::AlignCenter);
 		CelDrawTo(out, { 40 + PANEL_X, -17 + PANEL_Y }, *pChrButtons, nCel);
 	}
 }
@@ -1512,13 +1496,13 @@ void DrawSpellBook(const Surface &out)
 	auto &myPlayer = Players[MyPlayerId];
 	uint64_t spl = myPlayer._pMemSpells | myPlayer._pISpells | myPlayer._pAblSpells;
 
-	int yp = 55;
+	int yp = 43;
 	for (int i = 1; i < 8; i++) {
 		spell_id sn = SpellPages[sbooktab][i - 1];
 		if (sn != SPL_INVALID && (spl & GetSpellBitmask(sn)) != 0) {
 			spell_type st = GetSBookTrans(sn, true);
 			SetSpellTrans(st);
-			const Point spellCellPosition = GetPanelPosition(UiPanels::Spell, { 11, yp });
+			const Point spellCellPosition = GetPanelPosition(UiPanels::Spell, { 11, yp + 12 });
 			DrawSpellCel(out, spellCellPosition, *pSBkIconCels, SpellITbl[sn]);
 			if (sn == myPlayer._pRSpell && st == myPlayer._pRSplType) {
 				SetSpellTrans(RSPLTYPE_SKILL);
@@ -1612,12 +1596,12 @@ void DrawGoldSplit(const Surface &out, int amount)
 	tempstr[BufferSize - 1] = '\0';
 
 	// Pre-wrap the string at spaces, otherwise DrawString would hard wrap in the middle of words
-	WordWrapGameString(tempstr, 200);
+	WordWrapString(tempstr, 200);
 
 	// The split gold dialog is roughly 4 lines high, but we need at least one line for the player to input an amount.
 	// Using a clipping region 50 units high (approx 3 lines with a lineheight of 17) to ensure there is enough room left
 	//  for the text entered by the player.
-	DrawString(out, tempstr, { GetPanelPosition(UiPanels::Inventory, { dialogX + 31, 87 }), { 200, 50 } }, UiFlags::ColorGold | UiFlags::AlignCenter, 1, 17);
+	DrawString(out, tempstr, { GetPanelPosition(UiPanels::Inventory, { dialogX + 31, 75 }), { 200, 50 } }, UiFlags::ColorGold | UiFlags::AlignCenter, 1, 17);
 
 	tempstr[0] = '\0';
 	if (amount > 0) {
@@ -1626,7 +1610,7 @@ void DrawGoldSplit(const Surface &out, int amount)
 	}
 	// Even a ten digit amount of gold only takes up about half a line. There's no need to wrap or clip text here so we
 	// use the Point form of DrawString.
-	DrawString(out, tempstr, GetPanelPosition(UiPanels::Inventory, { dialogX + 37, 140 }), UiFlags::ColorSilver, 1, -1, true);
+	DrawString(out, tempstr, GetPanelPosition(UiPanels::Inventory, { dialogX + 37, 128 }), UiFlags::ColorWhite | UiFlags::PentaCursor);
 }
 
 void control_drop_gold(char vkey)
@@ -1683,9 +1667,9 @@ void DrawTalkPan(const Surface &out)
 	char *msg = TalkMessage;
 
 	int x = PANEL_LEFT + 200;
-	int y = PANEL_Y + 22;
+	int y = PANEL_Y + 10;
 
-	int idx = DrawString(out, msg, { { x, y }, { 250, 39 } }, UiFlags::ColorSilver, 1, 13, true);
+	int idx = DrawString(out, msg, { { x, y }, { 250, 27 } }, UiFlags::ColorWhite | UiFlags::PentaCursor, 1, 13);
 	msg[idx] = '\0';
 
 	x += 46;
