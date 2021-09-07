@@ -1580,7 +1580,7 @@ bool MonsterAttack(int i)
 	return false;
 }
 
-bool MonaterRangedAttack(int i)
+bool MonsterRangedAttack(int i)
 {
 	assert(i >= 0 && i < MAXMONSTERS);
 	auto &monster = Monsters[i];
@@ -4353,7 +4353,7 @@ void ProcessMonsters()
 				raflag = MonsterFadeout(monster);
 				break;
 			case MonsterMode::RangedAttack:
-				raflag = MonaterRangedAttack(mi);
+				raflag = MonsterRangedAttack(mi);
 				break;
 			case MonsterMode::SpecialStand:
 				raflag = MonsterSpecialStand(monster);

@@ -90,6 +90,8 @@ struct GameplayOptions {
 	bool bCowQuest;
 	/** @brief Will players still damage other players in non-PvP mode. */
 	bool bFriendlyFire;
+	/** @brief Is experience shared between players in non-PvP mode. */
+	bool bSharedExperience;
 	/** @brief Enable the bard hero class. */
 	bool bTestBard;
 	/** @brief Enable the babarian hero class. */

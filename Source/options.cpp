@@ -258,6 +258,7 @@ void LoadOptions()
 	sgOptions.Gameplay.bTheoQuest = GetIniBool("Game", "Theo Quest", false);
 	sgOptions.Gameplay.bCowQuest = GetIniBool("Game", "Cow Quest", false);
 	sgOptions.Gameplay.bFriendlyFire = GetIniBool("Game", "Friendly Fire", true);
+	sgOptions.Gameplay.bSharedExperience = GetIniBool("Game", "Shared Experience", false);
 	sgOptions.Gameplay.bTestBard = GetIniBool("Game", "Test Bard", false);
 	sgOptions.Gameplay.bTestBarbarian = GetIniBool("Game", "Test Barbarian", false);
 	sgOptions.Gameplay.bExperienceBar = GetIniBool("Game", "Experience Bar", false);

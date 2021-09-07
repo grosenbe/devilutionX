@@ -9,6 +9,7 @@
 #include "control.h"
 #include "cursor.h"
 #include "dead.h"
+#include "multi.h"
 #ifdef _DEBUG
 #include "debug.h"
 #endif
@@ -2635,7 +2636,7 @@ void NextPlrLevel(int pnum)
 
 void AddPlrExperience(int pnum, int lvl, int exp)
 {
-	if (pnum != MyPlayerId) {
+	if (pnum != MyPlayerId && sgGameInitInfo.bSharedExperience == 0) {
 		return;
 	}
 
@@ -2699,8 +2700,14 @@ void AddPlrMonstExper(int lvl, int exp, char pmask)
 
 	if (totplrs != 0) {
 		int e = exp / totplrs;
-		if ((pmask & (1 << MyPlayerId)) != 0)
-			AddPlrExperience(MyPlayerId, lvl, e);
+		if (sgGameInitInfo.bSharedExperience != 1) {
+			if ((pmask & (1 << MyPlayerId)) != 0)
+				AddPlrExperience(MyPlayerId, lvl, e);
+		} else {
+			for (auto i = 0; i < MAX_PLRS; i++) {
+				AddPlrExperience(i, lvl, e);
+			}
+		}
 	}
 }
 

@@ -34,6 +34,7 @@ struct GameData {
 	uint8_t bTheoQuest;
 	uint8_t bCowQuest;
 	uint8_t bFriendlyFire;
+	uint8_t bSharedExperience;
 };
 
 extern bool gbSomebodyWonGameKludge;
