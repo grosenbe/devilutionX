@@ -850,9 +850,8 @@ void DrawDungeon(const Surface &out, Point tilePosition, Point targetBufferPosit
 	if (LightTableIndex < LightsMax && bDead != 0) {
 		do {
 			Corpse *pDeadGuy = &Corpses[(bDead & 0x1F) - 1];
-			auto dd = static_cast<Direction>((bDead >> 5) & 7);
 			int px = targetBufferPosition.x - CalculateWidth2(pDeadGuy->width);
-			const byte *pCelBuff = pDeadGuy->data[dd];
+			const byte *pCelBuff = pDeadGuy->data[(bDead >> 5) & 7];
 			assert(pCelBuff != nullptr);
 			const auto *frameTable = reinterpret_cast<const uint32_t *>(pCelBuff);
 			int frames = SDL_SwapLE32(frameTable[0]);
@@ -943,11 +942,11 @@ void DrawFloor(const Surface &out, Point tilePosition, Point targetBufferPositio
 			} else {
 				world_draw_black_tile(out, targetBufferPosition.x, targetBufferPosition.y);
 			}
-			tilePosition += DIR_E;
+			tilePosition += Direction::East;
 			targetBufferPosition.x += TILE_WIDTH;
 		}
 		// Return to start of row
-		tilePosition += Displacement(DIR_W) * columns;
+		tilePosition += Displacement(Direction::West) * columns;
 		targetBufferPosition.x -= columns * TILE_WIDTH;
 
 		// Jump to next row
@@ -991,7 +990,7 @@ void DrawTileContent(const Surface &out, Point tilePosition, Point targetBufferP
 					// sprite screen position rather than tile position.
 					if (IsWall(tilePosition.x, tilePosition.y) && (IsWall(tilePosition.x + 1, tilePosition.y) || (tilePosition.x > 0 && IsWall(tilePosition.x - 1, tilePosition.y)))) { // Part of a wall aligned on the x-axis
 						if (IsWalkable(tilePosition.x + 1, tilePosition.y - 1) && IsWalkable(tilePosition.x, tilePosition.y - 1)) {                                                     // Has walkable area behind it
-							DrawDungeon(out, tilePosition + DIR_E, { targetBufferPosition.x + TILE_WIDTH, targetBufferPosition.y });
+							DrawDungeon(out, tilePosition + Direction::East, { targetBufferPosition.x + TILE_WIDTH, targetBufferPosition.y });
 						}
 					}
 				}
@@ -999,11 +998,11 @@ void DrawTileContent(const Surface &out, Point tilePosition, Point targetBufferP
 					DrawDungeon(out, tilePosition, targetBufferPosition);
 				}
 			}
-			tilePosition += DIR_E;
+			tilePosition += Direction::East;
 			targetBufferPosition.x += TILE_WIDTH;
 		}
 		// Return to start of row
-		tilePosition += Displacement(DIR_W) * columns;
+		tilePosition += Displacement(Direction::West) * columns;
 		targetBufferPosition.x -= columns * TILE_WIDTH;
 
 		// Jump to next row
@@ -1109,23 +1108,23 @@ void DrawGame(const Surface &fullOut, Point position)
 	if (CanPanelsCoverView()) {
 		if (zoomflag) {
 			if (chrflag || QuestLogIsOpen) {
-				position += Displacement(DIR_E) * 2;
+				position += Displacement(Direction::East) * 2;
 				columns -= 4;
 				sx += SPANEL_WIDTH - TILE_WIDTH / 2;
 			}
 			if (invflag || sbookflag) {
-				position += Displacement(DIR_E) * 2;
+				position += Displacement(Direction::East) * 2;
 				columns -= 4;
 				sx += -TILE_WIDTH / 2;
 			}
 		} else {
 			if (chrflag || QuestLogIsOpen) {
-				position += DIR_E;
+				position += Direction::East;
 				columns -= 2;
 				sx += -TILE_WIDTH / 2 / 2; // SPANEL_WIDTH accounted for in Zoom()
 			}
 			if (invflag || sbookflag) {
-				position += DIR_E;
+				position += Direction::East;
 				columns -= 2;
 				sx += -TILE_WIDTH / 2 / 2;
 			}
@@ -1136,46 +1135,46 @@ void DrawGame(const Surface &fullOut, Point position)
 
 	// Draw areas moving in and out of the screen
 	switch (ScrollInfo._sdir) {
-	case SDIR_N:
+	case ScrollDirection::North:
 		sy -= TILE_HEIGHT;
-		position += DIR_N;
+		position += Direction::North;
 		rows += 2;
 		break;
-	case SDIR_NE:
+	case ScrollDirection::NorthEast:
 		sy -= TILE_HEIGHT;
-		position += DIR_N;
+		position += Direction::North;
 		columns++;
 		rows += 2;
 		break;
-	case SDIR_E:
+	case ScrollDirection::East:
 		columns++;
 		break;
-	case SDIR_SE:
+	case ScrollDirection::SouthEast:
 		columns++;
 		rows++;
 		break;
-	case SDIR_S:
+	case ScrollDirection::South:
 		rows += 2;
 		break;
-	case SDIR_SW:
+	case ScrollDirection::SouthWest:
 		sx -= TILE_WIDTH;
-		position += DIR_W;
+		position += Direction::West;
 		columns++;
 		rows++;
 		break;
-	case SDIR_W:
+	case ScrollDirection::West:
 		sx -= TILE_WIDTH;
-		position += DIR_W;
+		position += Direction::West;
 		columns++;
 		break;
-	case SDIR_NW:
+	case ScrollDirection::NorthWest:
 		sx -= TILE_WIDTH / 2;
 		sy -= TILE_HEIGHT / 2;
-		position += DIR_NW;
+		position += Direction::NorthWest;
 		columns++;
 		rows++;
 		break;
-	case SDIR_NONE:
+	case ScrollDirection::None:
 		break;
 	}
 
@@ -1202,25 +1201,32 @@ void DrawView(const Surface &out, Point startPosition)
 		DrawAutomap(out.subregionY(0, gnViewportHeight));
 	}
 #ifdef _DEBUG
-	if (DebugCoords || DebugGrid || DebugCursorCoords) {
+	bool debugInfo = DebugInfoFlag != DebugInfoFlags::empty;
+	if (DebugCoords || DebugGrid || DebugCursorCoords || debugInfo) {
+		// force redrawing or debug stuff stays on panel on 640x480 resolution
+		force_redraw = 255;
 		for (auto m : DebugCoordsMap) {
 			Point dunCoords = { m.first % MAXDUNX, m.first / MAXDUNX };
 			Point pixelCoords = m.second;
-			Displacement ver = { 0, -TILE_HEIGHT / 2 };
-			Displacement hor = { TILE_WIDTH / 2, 0 };
-			if (!zoomflag) {
+			if (!zoomflag)
 				pixelCoords *= 2;
-				hor *= 2;
-				ver *= 2;
-			}
-			Point center = pixelCoords + hor + ver;
-			if (DebugCoords || (DebugCursorCoords && dunCoords == cursPosition)) {
-				char coordstr[10];
-				sprintf(coordstr, "%d:%d", dunCoords.x, dunCoords.y);
-				int textWidth = GetLineWidth(coordstr);
-				int textHeight = 12;
-				Point position = center + Displacement { -textWidth / 2, textHeight / 2 };
-				DrawString(out, coordstr, { position, { textWidth, textHeight } }, UiFlags::ColorRed);
+			if (DebugCoords || (DebugCursorCoords && dunCoords == cursPosition) || debugInfo) {
+				char buffer[10];
+				bool drawText = true;
+				if (!debugInfo)
+					sprintf(buffer, "%d:%d", dunCoords.x, dunCoords.y);
+				else {
+					int value = DebugGetTileData(dunCoords);
+					sprintf(buffer, "%d", value);
+					if (value == 0)
+						drawText = false;
+				}
+
+				Size tileSize = { TILE_WIDTH, TILE_HEIGHT };
+				if (!zoomflag)
+					tileSize *= 2;
+				if (drawText)
+					DrawString(out, buffer, { pixelCoords - Displacement { 0, tileSize.height }, tileSize }, UiFlags::ColorRed | UiFlags::AlignCenter | UiFlags::VerticalCenter);
 			}
 			if (DebugGrid) {
 				auto DrawLine = [&out](Point from, Point to, uint8_t col) {
@@ -1236,11 +1242,19 @@ void DrawView(const Surface &out, Point startPosition)
 						out.SetPixel({ (int)sx, (int)sy }, col);
 				};
 
+				Displacement hor = { TILE_WIDTH / 2, 0 };
+				Displacement ver = { 0, TILE_HEIGHT / 2 };
+				if (!zoomflag) {
+					hor *= 2;
+					ver *= 2;
+				}
+				Point center = pixelCoords + hor - ver;
+
 				uint8_t col = PAL16_BEIGE;
-				DrawLine(center - hor, center - ver, col);
-				DrawLine(center + hor, center - ver, col);
 				DrawLine(center - hor, center + ver, col);
 				DrawLine(center + hor, center + ver, col);
+				DrawLine(center - hor, center - ver, col);
+				DrawLine(center + hor, center - ver, col);
 			}
 		}
 	}
@@ -1321,7 +1335,7 @@ void DrawFPS(const Surface &out)
 		frameend = 0;
 	}
 	snprintf(string, 12, "%i FPS", framerate);
-	DrawString(out, string, Point { 8, 65 }, UiFlags::ColorRed);
+	DrawString(out, string, Point { 8, 53 }, UiFlags::ColorRed);
 }
 
 /**
@@ -1401,48 +1415,36 @@ void DrawMain(int dwHgt, bool drawDesc, bool drawHp, bool drawMana, bool drawSba
 Displacement GetOffsetForWalking(const AnimationInfo &animationInfo, const Direction dir, bool cameraMode /*= false*/)
 {
 	// clang-format off
-	//                                           DIR_S,        DIR_SW,       DIR_W,	       DIR_NW,        DIR_N,        DIR_NE,        DIR_E,        DIR_SE,
+	//                                           South,        SouthWest,    West,         NorthWest,    North,        NorthEast,     East,         SouthEast,
 	constexpr Displacement StartOffset[8]    = { {   0, -32 }, {  32, -16 }, {  32, -16 }, {   0,   0 }, {   0,   0 }, {  0,    0 },  { -32, -16 }, { -32, -16 } };
 	constexpr Displacement MovingOffset[8]   = { {   0,  32 }, { -32,  16 }, { -64,   0 }, { -32, -16 }, {   0, -32 }, {  32, -16 },  {  64,   0 }, {  32,  16 } };
 	// clang-format on
 
 	float fAnimationProgress = animationInfo.GetAnimationProgress();
-	Displacement offset = MovingOffset[dir];
+	Displacement offset = MovingOffset[static_cast<size_t>(dir)];
 	offset *= fAnimationProgress;
 
 	if (cameraMode) {
 		offset = -offset;
 	} else {
-		offset += StartOffset[dir];
+		offset += StartOffset[static_cast<size_t>(dir)];
 	}
 
 	return offset;
 }
 
-/**
- * @brief Clear cursor state
- */
 void ClearCursor() // CODE_FIX: this was supposed to be in cursor.cpp
 {
 	sgdwCursWdt = 0;
 	sgdwCursWdtOld = 0;
 }
 
-/**
- * @brief Shifting the view area along the logical grid
- *        Note: this won't allow you to shift between even and odd rows
- * @param horizontal Shift the screen left or right
- * @param vertical Shift the screen up or down
- */
 void ShiftGrid(int *x, int *y, int horizontal, int vertical)
 {
 	*x += vertical + horizontal;
 	*y += vertical - horizontal;
 }
 
-/**
- * @brief Gets the number of rows covered by the main panel
- */
 int RowsCoveredByPanel()
 {
 	if (gnScreenWidth <= PANEL_WIDTH) {
@@ -1457,11 +1459,6 @@ int RowsCoveredByPanel()
 	return rows;
 }
 
-/**
- * @brief Calculate the offset needed for centering tiles in view area
- * @param offsetX Offset in pixels
- * @param offsetY Offset in pixels
- */
 void CalcTileOffset(int *offsetX, int *offsetY)
 {
 	int x;
@@ -1484,11 +1481,6 @@ void CalcTileOffset(int *offsetX, int *offsetY)
 	*offsetY = y;
 }
 
-/**
- * @brief Calculate the needed diamond tile to cover the view area
- * @param columns Tiles needed per row
- * @param rows Both even and odd rows
- */
 void TilesInView(int *rcolumns, int *rrows)
 {
 	int columns = gnScreenWidth / TILE_WIDTH;
@@ -1530,8 +1522,8 @@ void CalcViewportGeometry()
 	int lrow = tileRows - RowsCoveredByPanel();
 
 	// Center player tile on screen
-	tileShift += Displacement(DIR_W) * (tileColums / 2);
-	tileShift += Displacement(DIR_N) * (lrow / 2);
+	tileShift += Displacement(Direction::West) * (tileColums / 2);
+	tileShift += Displacement(Direction::North) * (lrow / 2);
 
 	tileRows *= 2;
 
@@ -1545,7 +1537,7 @@ void CalcViewportGeometry()
 		}
 	} else if ((tileColums & 1) != 0 && (lrow & 1) != 0) {
 		// Offset tile to vertically align the player when both rows and colums are odd
-		tileShift += Displacement(DIR_N);
+		tileShift += Displacement(Direction::North);
 		tileRows++;
 		tileOffset.deltaY -= TILE_HEIGHT / 2;
 	}
@@ -1560,25 +1552,19 @@ void CalcViewportGeometry()
 	tileRows++; // Cover lower edge saw tooth, right edge accounted for in scrollrt_draw()
 }
 
-extern SDL_Surface *pal_surface;
+extern SDL_Surface *PalSurface;
 
-/**
- * @brief Render the whole screen black
- */
 void ClearScreenBuffer()
 {
 	lock_buf(3);
 
-	assert(pal_surface != nullptr);
-	SDL_FillRect(pal_surface, nullptr, 0);
+	assert(PalSurface != nullptr);
+	SDL_FillRect(PalSurface, nullptr, 0);
 
 	unlock_buf(3);
 }
 
 #ifdef _DEBUG
-/**
- * @brief Scroll the screen when mouse is close to the edge
- */
 void ScrollView()
 {
 	bool scroll;
@@ -1654,22 +1640,16 @@ void ScrollView()
 	}
 
 	if (scroll)
-		ScrollInfo._sdir = SDIR_NONE;
+		ScrollInfo._sdir = ScrollDirection::None;
 }
 #endif
 
-/**
- * @brief Initialize the FPS meter
- */
 void EnableFrameCount()
 {
 	frameflag = !frameflag;
 	framestart = SDL_GetTicks();
 }
 
-/**
- * @brief Redraw screen
- */
 void scrollrt_draw_game_screen()
 {
 	int hgt = 0;
@@ -1698,9 +1678,6 @@ void scrollrt_draw_game_screen()
 	}
 }
 
-/**
- * @brief Render the game
- */
 void DrawAndBlit()
 {
 	if (!gbRunGame) {

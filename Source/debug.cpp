@@ -18,6 +18,8 @@
 #include "error.h"
 #include "inv.h"
 #include "lighting.h"
+#include "monstdat.h"
+#include "monster.h"
 #include "setmaps.h"
 #include "spells.h"
 #include "towners.h"
@@ -27,12 +29,14 @@
 namespace devilution {
 
 std::optional<CelSprite> pSquareCel;
+bool DebugToggle = false;
 bool DebugGodMode = false;
 bool DebugVision = false;
 bool DebugCoords = false;
 bool DebugCursorCoords = false;
 bool DebugGrid = false;
 std::unordered_map<int, Point> DebugCoordsMap;
+DebugInfoFlags DebugInfoFlag;
 
 namespace {
 
@@ -60,13 +64,13 @@ void PrintDebugMonster(int m)
 
 	auto &monster = Monsters[m];
 
-	sprintf(dstr, "Monster %i = %s", m, _(monster.mName));
+	sprintf(dstr, "Monster %i = %s", m, monster.mName);
 	NetSendCmdString(1 << MyPlayerId, dstr);
 	sprintf(dstr, "X = %i, Y = %i", monster.position.tile.x, monster.position.tile.y);
 	NetSendCmdString(1 << MyPlayerId, dstr);
 	sprintf(dstr, "Enemy = %i, HP = %i", monster._menemy, monster._mhitpoints);
 	NetSendCmdString(1 << MyPlayerId, dstr);
-	sprintf(dstr, "Mode = %i, Var1 = %i", monster._mmode, monster._mVar1);
+	sprintf(dstr, "Mode = %i, Var1 = %i", static_cast<int>(monster._mmode), monster._mVar1);
 	NetSendCmdString(1 << MyPlayerId, dstr);
 
 	bool bActive = false;
@@ -157,7 +161,7 @@ std::string DebugCmdTakeGoldCheat(const string_view parameter)
 
 		if (itemId < 0)
 			continue;
-		if (myPlayer.InvList[itemId]._itype != ITYPE_GOLD)
+		if (myPlayer.InvList[itemId]._itype != ItemType::Gold)
 			continue;
 
 		myPlayer.RemoveInvItem(itemId);
@@ -193,7 +197,6 @@ std::string DebugCmdLoadMap(const string_view parameter)
 		return ret;
 	}
 
-	auto &myPlayer = Players[MyPlayerId];
 	auto level = atoi(parameter.data());
 	if (level < 1)
 		return fmt::format("Map id must be 1 or higher", level);
@@ -477,6 +480,140 @@ std::string DebugCmdLevelSeed(const string_view parameter)
 	return fmt::format("Seedinfo for level {}\nseed: {}\nMid1: {}\nMid2: {}\nMid3: {}\nEnd: {}", currlevel, glSeedTbl[currlevel], glMid1Seed[currlevel], glMid2Seed[currlevel], glMid3Seed[currlevel], glEndSeed[currlevel]);
 }
 
+std::string DebugCmdSpawnMonster(const string_view parameter)
+{
+	if (currlevel == 0)
+		return "Do you want to kill the towners?!?";
+
+	std::stringstream paramsStream(parameter.data());
+	std::string name;
+	int count = 1;
+	if (std::getline(paramsStream, name, ' ')) {
+		count = atoi(name.c_str());
+		if (count > 0)
+			name.clear();
+		else
+			count = 1;
+		std::getline(paramsStream, name, ' ');
+	}
+
+	std::string singleWord;
+	while (std::getline(paramsStream, singleWord, ' ')) {
+		name.append(" ");
+		name.append(singleWord);
+	}
+
+	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+
+	int mtype = -1;
+	for (int i = 0; i < 138; i++) {
+		auto mondata = MonstersData[i];
+		std::string monsterName(mondata.mName);
+		std::transform(monsterName.begin(), monsterName.end(), monsterName.begin(), [](unsigned char c) { return std::tolower(c); });
+		if (monsterName.find(name) == std::string::npos)
+			continue;
+		mtype = i;
+		break;
+	}
+
+	if (mtype == -1) {
+		for (int i = 0; i < 100; i++) {
+			auto mondata = UniqueMonstersData[i];
+			std::string monsterName(mondata.mName);
+			std::transform(monsterName.begin(), monsterName.end(), monsterName.begin(), [](unsigned char c) { return std::tolower(c); });
+			if (monsterName.find(name) == std::string::npos)
+				continue;
+			mtype = mondata.mtype;
+			break;
+		}
+	}
+
+	if (mtype == -1)
+		return "Monster not found!";
+
+	int id = MAX_LVLMTYPES - 1;
+	bool found = false;
+
+	for (int i = 0; i < LevelMonsterTypeCount; i++) {
+		if (LevelMonsterTypes[i].mtype == mtype) {
+			id = i;
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		LevelMonsterTypes[id].mtype = static_cast<_monster_id>(mtype);
+		InitMonsterGFX(id);
+		LevelMonsterTypes[id].mPlaceFlags |= PLACE_SCATTER;
+		LevelMonsterTypes[id].mdeadval = 1;
+	}
+
+	auto &myPlayer = Players[MyPlayerId];
+
+	int spawnedMonster = 0;
+
+	for (int k : CrawlNum) {
+		int ck = k + 2;
+		for (auto j = static_cast<uint8_t>(CrawlTable[k]); j > 0; j--, ck += 2) {
+			Point pos = myPlayer.position.tile + Displacement { CrawlTable[ck - 1], CrawlTable[ck] };
+			if (dPlayer[pos.x][pos.y] != 0 || dMonster[pos.x][pos.y] != 0)
+				continue;
+			if (!IsTileWalkable(pos))
+				continue;
+
+			if (AddMonster(pos, myPlayer._pdir, id, true) < 0)
+				return fmt::format("I could only summon {} Monsters. The rest strike for shorter working hours.", spawnedMonster);
+			spawnedMonster += 1;
+
+			if (spawnedMonster >= count)
+				return "Let the fighting begin!";
+		}
+	}
+
+	return fmt::format("I could only summon {} Monsters. The rest strike for shorter working hours.", spawnedMonster);
+}
+
+std::string DebugCmdShowTileData(const string_view parameter)
+{
+	std::string paramList[] = {
+		"dPiece",
+		"dTransVal",
+		"dLight",
+		"dPreLight",
+		"dFlags",
+		"dPlayer",
+		"dMonster",
+		"dCorpse",
+		"dObject",
+		"dItem",
+		"dSpecial"
+	};
+
+	if (parameter == "clear") {
+		DebugInfoFlag = DebugInfoFlags::empty;
+		return "Tile data cleared!";
+	} else if (parameter == "") {
+		std::string list = "clear";
+		for (int i = 0; i < 11; i++) {
+			list += " / " + paramList[i];
+		}
+		return list;
+	}
+	bool found = false;
+	for (int i = 0; i < 11; i++) {
+		if (parameter == paramList[i]) {
+			found = true;
+			DebugInfoFlag = static_cast<DebugInfoFlags>(1 << i);
+			break;
+		}
+	}
+	if (!found)
+		return "Invalid name. Check names using tiledata command.";
+
+	return "Special powers activated.";
+}
+
 std::vector<DebugCmdItem> DebugCmdList = {
 	{ "help", "Prints help overview or help for a specific command.", "({command})", &DebugCmdHelp },
 	{ "give gold", "Fills the inventory with gold.", "", &DebugCmdGiveGoldCheat },
@@ -502,6 +639,8 @@ std::vector<DebugCmdItem> DebugCmdList = {
 	{ "cursorcoords", "Toggles showing cursor coords.", "", &DebugCmdShowCursorCoords },
 	{ "grid", "Toggles showing grid.", "", &DebugCmdShowGrid },
 	{ "seedinfo", "Show seed infos for current level.", "", &DebugCmdLevelSeed },
+	{ "spawn", "Spawns monster {name}.", "({count}) {name}", &DebugCmdSpawnMonster },
+	{ "tiledata", "Toggles showing tile data {name} (leave name empty to see a list).", "{name}", &DebugCmdShowTileData },
 };
 
 } // namespace
@@ -606,6 +745,33 @@ bool CheckDebugTextCommand(const string_view text)
 	Log("DebugCmd: {} Result: {}", text, result);
 	InitDiabloMsg(result);
 	return true;
+}
+
+int DebugGetTileData(Point dungeonCoords)
+{
+	switch (DebugInfoFlag) {
+	case DebugInfoFlags::dPiece:
+		return dPiece[dungeonCoords.x][dungeonCoords.y];
+	case DebugInfoFlags::dTransVal:
+		return dTransVal[dungeonCoords.x][dungeonCoords.y];
+	case DebugInfoFlags::dLight:
+		return dLight[dungeonCoords.x][dungeonCoords.y];
+	case DebugInfoFlags::dPreLight:
+		return dPreLight[dungeonCoords.x][dungeonCoords.y];
+	case DebugInfoFlags::dFlags:
+		return dFlags[dungeonCoords.x][dungeonCoords.y];
+	case DebugInfoFlags::dPlayer:
+		return dPlayer[dungeonCoords.x][dungeonCoords.y];
+	case DebugInfoFlags::dMonster:
+		return dMonster[dungeonCoords.x][dungeonCoords.y];
+	case DebugInfoFlags::dCorpse:
+		return dCorpse[dungeonCoords.x][dungeonCoords.y];
+	case DebugInfoFlags::dItem:
+		return dItem[dungeonCoords.x][dungeonCoords.y];
+	case DebugInfoFlags::dSpecial:
+		return dSpecial[dungeonCoords.x][dungeonCoords.y];
+	}
+	return 0;
 }
 
 } // namespace devilution

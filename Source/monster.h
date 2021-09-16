@@ -133,6 +133,12 @@ enum class LeaderRelation : uint8_t {
 struct AnimStruct {
 	std::unique_ptr<byte[]> CMem;
 	std::array<std::optional<CelSprite>, 8> CelSpritesForDirections;
+
+	inline const std::optional<CelSprite> &GetCelSpritesForDirection(Direction direction) const
+	{
+		return CelSpritesForDirections[static_cast<size_t>(direction)];
+	}
+
 	int Frames;
 	int Rate;
 };
@@ -214,6 +220,29 @@ struct Monster { // note: missing field _mAFNum
 	const MonsterData *MData;
 
 	/**
+	 * @brief Sets the current cell sprite to match the desired direction and animation sequence
+	 * @param graphic Animation sequence of interest
+	 * @param direction Desired direction the monster should be visually facing
+	*/
+	void ChangeAnimationData(MonsterGraphic graphic, Direction direction)
+	{
+		auto &animationData = this->MType->GetAnimData(graphic);
+		auto &celSprite = animationData.GetCelSpritesForDirection(direction);
+
+		// Passing the Frames and Rate properties here is only relevant when initialising a monster, but doesn't cause any harm when switching animations.
+		this->AnimInfo.ChangeAnimationData(celSprite ? &*celSprite : nullptr, animationData.Frames, animationData.Rate);
+	}
+
+	/**
+	 * @brief Sets the current cell sprite to match the desired animation sequence using the direction the monster is currently facing
+	 * @param graphic Animation sequence of interest
+	*/
+	void ChangeAnimationData(MonsterGraphic graphic)
+	{
+		this->ChangeAnimationData(graphic, this->_mdir);
+	}
+
+	/**
 	 * @brief Check thats the correct stand Animation is loaded. This is needed if direction is changed (monster stands and looks to player).
 	 * @param mdir direction of the monster
 	 */
@@ -271,6 +300,10 @@ void PrintMonstHistory(int mt);
 void PrintUniqueHistory();
 void PlayEffect(Monster &monster, int mode);
 void MissToMonst(Missile &missile, Point position);
+
+/**
+ * @brief Check that the given tile is available to the monster
+ */
 bool IsTileAvailable(const Monster &monster, Point position);
 bool IsSkel(int mt);
 bool IsGoat(int mt);
@@ -282,9 +315,5 @@ bool CanTalkToMonst(const Monster &monster);
 bool CheckMonsterHit(Monster &monster, bool *ret);
 int encode_enemy(Monster &monster);
 void decode_enemy(Monster &monster, int enemy);
-
-extern Direction left[8];
-extern Direction right[8];
-extern Direction opposite[8];
 
 } // namespace devilution

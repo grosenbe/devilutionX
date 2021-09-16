@@ -285,8 +285,6 @@ if(NOT NOSOUND)
 endif()
 
 add_library(smacker STATIC
-  3rdParty/libsmacker/smk_bitstream.c
-  3rdParty/libsmacker/smk_hufftree.c
   3rdParty/libsmacker/smacker.c)
 target_include_directories(smacker PUBLIC 3rdParty/libsmacker)
 
@@ -441,7 +439,6 @@ set(libdevilutionx_SRCS
   Source/DiabloUI/selok.cpp
   Source/DiabloUI/selyesno.cpp
   Source/DiabloUI/support_lines.cpp
-  Source/DiabloUI/text.cpp
   Source/DiabloUI/text_draw.cpp
   Source/DiabloUI/title.cpp
   Source/DiabloUI/ttf_render_wrapped.cpp

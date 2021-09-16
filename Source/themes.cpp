@@ -666,7 +666,7 @@ void Theme_Treasure(int t)
 				int rv = GenerateRnd(treasrnd[leveltype - 1]);
 				// BUGFIX: the `2*` in `2*GenerateRnd(treasrnd...) == 0` has no effect, should probably be `GenerateRnd(2*treasrnd...) == 0`
 				if ((2 * GenerateRnd(treasrnd[leveltype - 1])) == 0) {
-					CreateTypeItem({ xp, yp }, false, ITYPE_GOLD, IMISC_NONE, false, true);
+					CreateTypeItem({ xp, yp }, false, ItemType::Gold, IMISC_NONE, false, true);
 					ItemNoFlippy();
 				}
 				if (rv == 0) {
@@ -846,7 +846,7 @@ void Theme_GoatShrine(int t)
 	for (int yy = themey - 1; yy <= themey + 1; yy++) {
 		for (int xx = themex - 1; xx <= themex + 1; xx++) {
 			if (dTransVal[xx][yy] == themes[t].ttval && IsTileNotSolid({ xx, yy }) && (xx != themex || yy != themey)) {
-				AddMonster({ xx, yy }, DIR_SW, themeVar1, true);
+				AddMonster({ xx, yy }, Direction::SouthWest, themeVar1, true);
 			}
 		}
 	}

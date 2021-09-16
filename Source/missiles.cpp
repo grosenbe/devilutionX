@@ -36,8 +36,6 @@ namespace {
 ChainStruct chain[MAXMISSILES];
 int numchains;
 
-const int CrawlNum[19] = { 0, 3, 12, 45, 94, 159, 240, 337, 450, 579, 724, 885, 1062, 1255, 1464, 1689, 1930, 2187, 2460 };
-
 int AddClassHealingBonus(int hp, HeroClass heroClass)
 {
 	switch (heroClass) {
@@ -111,7 +109,7 @@ Monster *FindClosest(Point source, int rad)
 
 constexpr Direction16 Direction16Flip(Direction16 x, Direction16 pivot)
 {
-	unsigned ret = (2 * pivot + 16 - x) % 16;
+	std::underlying_type_t<Direction16> ret = (2 * static_cast<std::underlying_type_t<Direction16>>(pivot) + 16 - static_cast<std::underlying_type_t<Direction16>>(x)) % 16;
 
 	return static_cast<Direction16>(ret);
 }
@@ -167,33 +165,37 @@ void UpdateMissilePos(Missile &missile)
 	ChangeLightOffset(missile._mlid, { lx - (dx * 8), ly - (dy * 8) });
 }
 
+/**
+ * @brief Dodgy hack used to correct the position for charging monsters.
+ *
+ * If the monster represented by this missile is *not* facing north in some way it gets shifted to the south.
+ * This appears to compensate for some visual oddity or invalid calculation earlier in the MI_Rhino logic.
+ * @param missile MissileStruct representing a charging monster.
+ */
 void MoveMissilePos(Missile &missile)
 {
-	Displacement offset;
+	Direction moveDirection;
 
-	switch (missile._mimfnum) {
-	case DIR_NW:
-	case DIR_N:
-	case DIR_NE:
-		offset = { 0, 0 };
+	switch (static_cast<Direction>(missile._mimfnum)) {
+	case Direction::East:
+		moveDirection = Direction::SouthEast;
 		break;
-	case DIR_E:
-		offset = { 1, 0 };
+	case Direction::West:
+		moveDirection = Direction::SouthWest;
 		break;
-	case DIR_W:
-		offset = { 0, 1 };
+	case Direction::South:
+	case Direction::SouthWest:
+	case Direction::SouthEast:
+		moveDirection = Direction::South;
 		break;
-	case DIR_S:
-	case DIR_SW:
-	case DIR_SE:
-		offset = { 1, 1 };
-		break;
+	default:
+		return;
 	}
 
-	if (IsTileAvailable(Monsters[missile._misource], missile.position.tile + offset)) {
-		missile.position.tile += offset;
-		missile.position.offset.deltaX += (offset.deltaY * 32) - (offset.deltaX * 32);
-		missile.position.offset.deltaY -= (offset.deltaY * 16) + (offset.deltaX * 16);
+	auto target = missile.position.tile + moveDirection;
+	if (IsTileAvailable(Monsters[missile._misource], target)) {
+		missile.position.tile = target;
+		missile.position.offset += Displacement(moveDirection).WorldToScreen();
 	}
 }
 
@@ -590,6 +592,95 @@ void CheckMissileCol(Missile &missile, int mindam, int maxdam, bool shift, Point
 		PlaySfxLoc(MissilesData[missile._mitype].miSFX, missile.position.tile);
 }
 
+/**
+ * @brief Could the missile collide with solid objects? (like walls or closed doors)
+ */
+bool CouldMissileCollideWithSolidObject(Point tile)
+{
+	int oid = dObject[tile.x][tile.y];
+	if (oid != 0) {
+		oid = abs(oid) - 1;
+		if (!Objects[oid]._oMissFlag)
+			return true;
+	}
+	return nMissileTable[dPiece[tile.x][tile.y]];
+}
+
+void MoveMissileAndCheckMissileCol(Missile &missile, int mindam, int maxdam, bool ignoreStart, bool ifCollidesDontMoveToHitTile)
+{
+	Point prevTile = missile.position.tile;
+	missile.position.traveled += missile.position.velocity;
+	UpdateMissilePos(missile);
+
+	int possibleVisitTiles;
+	if (missile.position.velocity.deltaX == 0 || missile.position.velocity.deltaY == 0)
+		possibleVisitTiles = prevTile.WalkingDistance(missile.position.tile);
+	else
+		possibleVisitTiles = prevTile.ManhattanDistance(missile.position.tile);
+
+	int16_t tileTargetHash = dMonster[missile.position.tile.x][missile.position.tile.y] ^ dPlayer[missile.position.tile.x][missile.position.tile.y];
+
+	if (possibleVisitTiles == 0) {
+		// missile didn't change the tile... check that we perform CheckMissileCol only once for any monster/player to avoid multiple hits for slow missiles
+		if (missile.lastCollisionTargetHash == tileTargetHash)
+			return;
+	}
+	// remember what target CheckMissileCol was checked against
+	missile.lastCollisionTargetHash = tileTargetHash;
+	// Did the missile skipped a tile?
+	if (possibleVisitTiles > 1) {
+		// Implementation note: If someone knows the correct math to calculate this without this step for step increase loop, I would really appreciate it.
+		auto incVelocity = missile.position.velocity * (0.01f / (float)(possibleVisitTiles - 1));
+		auto traveled = missile.position.traveled - missile.position.velocity;
+		do {
+			traveled += incVelocity;
+
+			// calculate in-between tile
+			int mx = traveled.deltaX >> 16;
+			int my = traveled.deltaY >> 16;
+			int dx = (mx + 2 * my) / 64;
+			int dy = (2 * my - mx) / 64;
+
+			auto tile = missile.position.start + Displacement { dx, dy };
+
+			// we are at the orginal calculated position => resume with normal logic
+			if (tile == missile.position.tile)
+				break;
+
+			// don't call CheckMissileCol more then once for a tile
+			if (prevTile == tile)
+				continue;
+			prevTile = tile;
+
+			CheckMissileCol(missile, mindam, maxdam, false, tile, false);
+
+			// Did missile hit anything?
+			if (missile._mirange != 0)
+				continue;
+
+			if ((missile._miHitFlag && MissilesData[missile._mitype].MovementDistribution == MissileMovementDistrubution::Blockable) || CouldMissileCollideWithSolidObject(tile)) {
+				missile.position.traveled = traveled;
+				if (ifCollidesDontMoveToHitTile && missile._mirange == 0) {
+					missile.position.traveled -= incVelocity;
+					UpdateMissilePos(missile);
+					missile.position.StopMissile();
+				} else {
+					UpdateMissilePos(missile);
+				}
+				return;
+			}
+		} while (true);
+	}
+	if (ignoreStart && missile.position.start == missile.position.tile)
+		return;
+	CheckMissileCol(missile, mindam, maxdam, false, missile.position.tile, false);
+	if (ifCollidesDontMoveToHitTile && missile._mirange == 0) {
+		missile.position.traveled -= missile.position.velocity;
+		UpdateMissilePos(missile);
+		missile.position.StopMissile();
+	}
+}
+
 void SetMissAnim(Missile &missile, int animtype)
 {
 	int dir = missile._mimfnum;
@@ -621,7 +712,7 @@ void AddRune(Missile &missile, Point dst, missile_id missileID)
 					continue;
 
 				int dp = dPiece[target.x][target.y];
-				if (nSolidTable[dp] || dObject[target.x][target.y] != 0 || (dFlags[i][j] & BFLAG_MISSILE) != 0)
+				if (nSolidTable[dp] || dObject[target.x][target.y] != 0 || (dFlags[target.x][target.y] & BFLAG_MISSILE) != 0)
 					continue;
 
 				missile.position.tile = target;
@@ -748,7 +839,7 @@ void SpawnLightning(Missile &missile, int dam)
 			AddMissile(
 			    position,
 			    missile.position.start,
-			    DIR_S,
+			    Direction::South,
 			    type,
 			    missile._micaster,
 			    missile._misource,
@@ -899,25 +990,6 @@ int GetSpellLevel(int playerId, spell_id sn)
 	return std::max(player._pISplLvlAdd + player._pSplLvl[sn], 0);
 }
 
-/**
- * @brief Returns the direction a vector from p1(x1, y1) to p2(x2, y2) is pointing to.
- *
- *      W  sW  SW   Sw  S
- *              ^
- *     nW       |       Se
- *              |
- *     NW ------+-----> SE
- *              |
- *     Nw       |       sE
- *              |
- *      N  Ne  NE   nE  E
- *
- * @param x1 the x coordinate of p1
- * @param y1 the y coordinate of p1
- * @param x2 the x coordinate of p2
- * @param y2 the y coordinate of p2
- * @return the direction of the p1->p2 vector
- */
 Direction16 GetDirection16(Point p1, Point p2)
 {
 	Displacement offset = p2 - p1;
@@ -932,22 +1004,22 @@ Direction16 GetDirection16(Point p1, Point p2)
 		flipMedian = true;
 	}
 
-	Direction16 ret = DIR16_S;
+	Direction16 ret = Direction16::South;
 	if (3 * absolute.deltaX <= (absolute.deltaY * 2)) { // mx/my <= 2/3, approximation of tan(33.75)
 		if (5 * absolute.deltaX < absolute.deltaY)      // mx/my < 0.2, approximation of tan(11.25)
-			ret = DIR16_SW;
+			ret = Direction16::SouthWest;
 		else
-			ret = DIR16_Sw;
+			ret = Direction16::South_SouthWest;
 	}
 
-	Direction16 medianPivot = DIR16_S;
+	Direction16 medianPivot = Direction16::South;
 	if (flipY) {
-		ret = Direction16Flip(ret, DIR16_SW);
-		medianPivot = Direction16Flip(medianPivot, DIR16_SW);
+		ret = Direction16Flip(ret, Direction16::SouthWest);
+		medianPivot = Direction16Flip(medianPivot, Direction16::SouthWest);
 	}
 	if (flipX) {
-		ret = Direction16Flip(ret, DIR16_SE);
-		medianPivot = Direction16Flip(medianPivot, DIR16_SE);
+		ret = Direction16Flip(ret, Direction16::SouthEast);
+		medianPivot = Direction16Flip(medianPivot, Direction16::SouthEast);
 	}
 	if (flipMedian)
 		ret = Direction16Flip(ret, medianPivot);
@@ -1335,14 +1407,11 @@ void AddBerserk(Missile &missile, Point dst, Direction /*midir*/)
 	}
 }
 
-/**
- * var1: Direction to place the spawn
- */
 void AddHorkSpawn(Missile &missile, Point dst, Direction midir)
 {
 	UpdateMissileVelocity(missile, dst, 8);
 	missile._mirange = 9;
-	missile.var1 = midir;
+	missile.var1 = static_cast<int32_t>(midir);
 	PutMissile(missile);
 }
 
@@ -1401,7 +1470,7 @@ void AddStealPotions(Missile &missile, Point /*dst*/, Direction /*midir*/)
 			bool hasPlayedSFX = false;
 			for (int si = 0; si < MAXBELTITEMS; si++) {
 				int ii = -1;
-				if (player.SpdList[si]._itype == ITYPE_MISC) {
+				if (player.SpdList[si]._itype == ItemType::Misc) {
 					if (GenerateRnd(2) == 0)
 						continue;
 					switch (player.SpdList[si]._iMiscId) {
@@ -1693,7 +1762,7 @@ void AddCboltArrow(Missile &missile, Point dst, Direction midir)
 	missile._mlid = AddLight(missile.position.start, 5);
 	UpdateMissileVelocity(missile, dst, 8);
 	missile.var1 = 5;
-	missile.var2 = midir;
+	missile.var2 = static_cast<int32_t>(midir);
 	missile._mirange = 256;
 }
 
@@ -1762,7 +1831,7 @@ void AddArrow(Missile &missile, Point dst, Direction midir)
 		}
 	}
 	UpdateMissileVelocity(missile, dst, av);
-	missile._miAnimFrame = GetDirection16(missile.position.start, dst) + 1;
+	missile._miAnimFrame = static_cast<int>(GetDirection16(missile.position.start, dst)) + 1;
 	missile._mirange = 256;
 }
 
@@ -1911,12 +1980,6 @@ void AddFirewall(Missile &missile, Point dst, Direction /*midir*/)
 	missile.var1 = missile._mirange - missile._miAnimLen;
 }
 
-/**
- * var1: X coordinate of the missile-light
- * var2: Y coordinate of the missile-light
- * var4: X coordinate of the missile-light
- * var5: Y coordinate of the missile-light
- */
 void AddFireball(Missile &missile, Point dst, Direction midir)
 {
 	if (missile.position.start == dst) {
@@ -1939,10 +2002,6 @@ void AddFireball(Missile &missile, Point dst, Direction midir)
 	missile._mlid = AddLight(missile.position.start, 8);
 }
 
-/**
- * var1: X coordinate of the missile
- * var2: Y coordinate of the missile
- */
 void AddLightctrl(Missile &missile, Point dst, Direction /*midir*/)
 {
 	if (missile._midam == 0 && missile._micaster == TARGET_MONSTERS)
@@ -2014,9 +2073,6 @@ void AddWeapexp(Missile &missile, Point dst, Direction /*midir*/)
 	missile._mirange = missile._miAnimLen - 1;
 }
 
-/**
- * var1: Animation
- */
 void AddTown(Missile &missile, Point dst, Direction /*midir*/)
 {
 	Point target = dst;
@@ -2031,7 +2087,7 @@ void AddTown(Missile &missile, Point dst, Direction /*midir*/)
 					continue;
 
 				int dp = dPiece[target.x][target.y];
-				if ((dFlags[i][j] & BFLAG_MISSILE) == 0 && !nSolidTable[dp] && !nMissileTable[dp] && dObject[target.x][target.y] == 0 && dPlayer[target.x][target.y] == 0) {
+				if ((dFlags[target.x][target.y] & BFLAG_MISSILE) == 0 && !nSolidTable[dp] && !nMissileTable[dp] && dObject[target.x][target.y] == 0 && dPlayer[target.x][target.y] == 0) {
 					if (!CheckIfTrig(target)) {
 						missile.position.tile = target;
 						missile.position.start = target;
@@ -2127,10 +2183,6 @@ void AddFiremove(Missile &missile, Point dst, Direction /*midir*/)
 	missile.position.offset.deltaY -= 32;
 }
 
-/**
- * var1: Animation
- * var3: Light strength
- */
 void AddGuardian(Missile &missile, Point dst, Direction /*midir*/)
 {
 	auto &player = Players[missile._misource];
@@ -2149,7 +2201,7 @@ void AddGuardian(Missile &missile, Point dst, Direction /*midir*/)
 
 			if (LineClearMissile(missile.position.start, target)) {
 				int dp = dPiece[target.x][target.y];
-				if (dMonster[target.x][target.y] == 0 && !nSolidTable[dp] && !nMissileTable[dp] && dObject[target.x][target.y] == 0 && (dFlags[i][j] & BFLAG_MISSILE) == 0) {
+				if (dMonster[target.x][target.y] == 0 && !nSolidTable[dp] && !nMissileTable[dp] && dObject[target.x][target.y] == 0 && (dFlags[target.x][target.y] & BFLAG_MISSILE) == 0) {
 					missile.position.tile = target;
 					missile.position.start = target;
 					missile._miDelFlag = false;
@@ -2177,10 +2229,6 @@ void AddGuardian(Missile &missile, Point dst, Direction /*midir*/)
 	}
 }
 
-/**
- * var1: X coordinate of the destination
- * var2: Y coordinate of the destination
- */
 void AddChain(Missile &missile, Point dst, Direction /*midir*/)
 {
 	missile.var1 = dst.x;
@@ -2193,9 +2241,9 @@ namespace {
 void InitMissileAnimationFromMonster(Missile &mis, Direction midir, const Monster &mon, MonsterGraphic graphic)
 {
 	const AnimStruct &anim = mon.MType->GetAnimData(graphic);
-	mis._mimfnum = midir;
+	mis._mimfnum = static_cast<int32_t>(midir);
 	mis._miAnimFlags = MissileDataFlags::None;
-	const auto &celSprite = *anim.CelSpritesForDirections[midir];
+	const auto &celSprite = *anim.CelSpritesForDirections[mis._mimfnum];
 	mis._miAnimData = celSprite.Data();
 	mis._miAnimDelay = anim.Rate;
 	mis._miAnimLen = anim.Frames;
@@ -2232,10 +2280,6 @@ void AddRhino(Missile &missile, Point dst, Direction midir)
 	PutMissile(missile);
 }
 
-/**
- * var1: X coordinate of the missile-light
- * var2: Y coordinate of the missile-light
- */
 void AddFlare(Missile &missile, Point dst, Direction midir)
 {
 	if (missile.position.start == dst) {
@@ -2266,10 +2310,6 @@ void AddFlare(Missile &missile, Point dst, Direction midir)
 	}
 }
 
-/**
- * var1: X coordinate of the missile-light
- * var2: Y coordinate of the missile-light
- */
 void AddAcid(Missile &missile, Point dst, Direction /*midir*/)
 {
 	UpdateMissileVelocity(missile, dst, 16);
@@ -2292,10 +2332,6 @@ void AddAcidpud(Missile &missile, Point /*dst*/, Direction /*midir*/)
 	missile._miPreFlag = true;
 }
 
-/**
- * var1: mmode of the monster
- * var2: mnum of the monster
- */
 void AddStone(Missile &missile, Point dst, Direction /*midir*/)
 {
 	Point target;
@@ -2377,7 +2413,7 @@ void AddGolem(Missile &missile, Point dst, Direction /*midir*/)
 				if (!LineClearMissile(missile.position.start, target))
 					continue;
 
-				if (dMonster[target.x][target.y] != 0 || nSolidTable[dPiece[target.x][target.y]] || dObject[target.x][target.y] != 0)
+				if (dMonster[target.x][target.y] != 0 || nSolidTable[dPiece[target.x][target.y]] || dObject[target.x][target.y] != 0 || dPlayer[target.x][target.y] != 0)
 					continue;
 
 				SpawnGolem(playerId, target, missile);
@@ -2431,12 +2467,6 @@ void AddHealOther(Missile &missile, Point /*dst*/, Direction /*midir*/)
 	}
 }
 
-/**
- * var1: X coordinate of the missile-light
- * var2: Y coordinate of the missile-light
- * var4: X coordinate of the destination
- * var5: Y coordinate of the destination
- */
 void AddElement(Missile &missile, Point dst, Direction midir)
 {
 	if (missile.position.start == dst) {
@@ -2475,14 +2505,6 @@ void AddIdentify(Missile &missile, Point /*dst*/, Direction /*midir*/)
 	}
 }
 
-/**
- * var1: X coordinate of the first wave
- * var2: Y coordinate of the first wave
- * var3: Direction of the first wave
- * var4: Direction of the second wave
- * var5: X coordinate of the second wave
- * var6: Y coordinate of the second wave
- */
 void AddFirewallC(Missile &missile, Point dst, Direction midir)
 {
 	missile._miDelFlag = true;
@@ -2509,8 +2531,8 @@ void AddFirewallC(Missile &missile, Point dst, Direction midir)
 	}
 
 	if (!missile._miDelFlag) {
-		missile.var3 = left[left[midir]];
-		missile.var4 = right[right[midir]];
+		missile.var3 = static_cast<int>(Left(Left(midir)));
+		missile.var4 = static_cast<int>(Right(Right(midir)));
 		missile._mirange = 7;
 		UseMana(missile._misource, SPL_FIREWALL);
 	}
@@ -2525,10 +2547,6 @@ void AddInfra(Missile &missile, Point /*dst*/, Direction /*midir*/)
 		UseMana(missile._misource, SPL_INFRA);
 }
 
-/**
- * var1: X coordinate of the destination
- * var2: Y coordinate of the destination
- */
 void AddWave(Missile &missile, Point dst, Direction /*midir*/)
 {
 	missile.var1 = dst.x;
@@ -2670,10 +2688,6 @@ void AddFlamec(Missile &missile, Point dst, Direction midir)
 	missile._mirange = 256;
 }
 
-/**
- * var1: Light strength
- * var2: Base direction
- */
 void AddCbolt(Missile &missile, Point dst, Direction midir)
 {
 	missile._mirnd = GenerateRnd(15) + 1;
@@ -2687,7 +2701,7 @@ void AddCbolt(Missile &missile, Point dst, Direction midir)
 
 	UpdateMissileVelocity(missile, dst, 8);
 	missile.var1 = 5;
-	missile.var2 = midir;
+	missile.var2 = static_cast<int>(midir);
 	missile._mirange = 256;
 }
 
@@ -2773,7 +2787,7 @@ void AddDiabApoca(Missile &missile, Point /*dst*/, Direction /*midir*/)
 		if (!LineClearMissile(missile.position.start, player.position.future))
 			continue;
 
-		AddMissile({ 0, 0 }, player.position.future, DIR_S, MIS_BOOM2, missile._micaster, missile._misource, missile._midam, 0);
+		AddMissile({ 0, 0 }, player.position.future, Direction::South, MIS_BOOM2, missile._micaster, missile._misource, missile._midam, 0);
 	}
 	missile._miDelFlag = true;
 }
@@ -2805,6 +2819,7 @@ int AddMissile(Point src, Point dst, Direction midir, missile_id mitype, mienemy
 	missile._miAnimType = missileData.mFileNum;
 	missile._miDrawFlag = missileData.mDraw;
 	missile._mlid = NO_LIGHT;
+	missile.lastCollisionTargetHash = 0;
 
 	if (missile._miAnimType == MFILE_NONE || MissileSpriteData[missile._miAnimType].animFAmt < 8)
 		SetMissDir(missile, 0);
@@ -2856,8 +2871,6 @@ void MI_LArrow(Missile &missile)
 		MissilesData[missile._mitype].mResist = rst;
 	} else {
 		missile._midist++;
-		missile.position.traveled += missile.position.velocity;
-		UpdateMissilePos(missile);
 
 		int mind;
 		int maxd;
@@ -2874,16 +2887,13 @@ void MI_LArrow(Missile &missile)
 			maxd = GenerateRnd(10) + 1 + currlevel * 2;
 		}
 
-		if (missile.position.tile != missile.position.start) {
-			missile_resistance rst = MissilesData[missile._mitype].mResist;
-			MissilesData[missile._mitype].mResist = MISR_NONE;
-			CheckMissileCol(missile, mind, maxd, false, missile.position.tile, false);
-			MissilesData[missile._mitype].mResist = rst;
-		}
+		missile_resistance rst = MissilesData[missile._mitype].mResist;
+		MissilesData[missile._mitype].mResist = MISR_NONE;
+		MoveMissileAndCheckMissileCol(missile, mind, maxd, true, true);
+		MissilesData[missile._mitype].mResist = rst;
+
 		if (missile._mirange == 0) {
 			missile._mimfnum = 0;
-			missile.position.traveled -= missile.position.velocity;
-			UpdateMissilePos(missile);
 			if (missile._mitype == MIS_LARROW)
 				SetMissAnim(missile, MFILE_MINILTNG);
 			else
@@ -2909,8 +2919,6 @@ void MI_Arrow(Missile &missile)
 {
 	missile._mirange--;
 	missile._midist++;
-	missile.position.traveled += missile.position.velocity;
-	UpdateMissilePos(missile);
 	int p = missile._misource;
 
 	int mind;
@@ -2927,8 +2935,7 @@ void MI_Arrow(Missile &missile)
 		mind = currlevel;
 		maxd = 2 * currlevel;
 	}
-	if (missile.position.tile != missile.position.start)
-		CheckMissileCol(missile, mind, maxd, false, missile.position.tile, false);
+	MoveMissileAndCheckMissileCol(missile, mind, maxd, true, false);
 	if (missile._mirange == 0)
 		missile._miDelFlag = true;
 	PutMissile(missile);
@@ -2940,10 +2947,6 @@ void MI_Firebolt(Missile &missile)
 
 	missile._mirange--;
 	if (missile._mitype != MIS_BONESPIRIT || missile._mimfnum != 8) {
-		int omx = missile.position.traveled.deltaX;
-		int omy = missile.position.traveled.deltaY;
-		missile.position.traveled += missile.position.velocity;
-		UpdateMissilePos(missile);
 		int p = missile._misource;
 		if (p != -1) {
 			if (missile._micaster == TARGET_MONSTERS) {
@@ -2968,14 +2971,9 @@ void MI_Firebolt(Missile &missile)
 		} else {
 			d = currlevel + GenerateRnd(2 * currlevel);
 		}
-		if (missile.position.tile != missile.position.start) {
-			CheckMissileCol(missile, d, d, false, missile.position.tile, false);
-		}
+		MoveMissileAndCheckMissileCol(missile, d, d, true, true);
 		if (missile._mirange == 0) {
 			missile._miDelFlag = true;
-			missile.position.traveled = { omx, omy };
-			UpdateMissilePos(missile);
-			missile.position.StopMissile();
 			missile.var4 = -(AvailableMissiles[0] + 1);
 			Point dst = { 0, 0 };
 			auto dir = static_cast<Direction>(missile._mimfnum);
@@ -3042,10 +3040,8 @@ void MI_Lightball(Missile &missile)
 	int tx = missile.var1;
 	int ty = missile.var2;
 	missile._mirange--;
-	missile.position.traveled += missile.position.velocity;
-	UpdateMissilePos(missile);
 	int j = missile._mirange;
-	CheckMissileCol(missile, missile._midam, missile._midam, false, missile.position.tile, false);
+	MoveMissileAndCheckMissileCol(missile, missile._midam, missile._midam, false, false);
 	if (missile._miHitFlag)
 		missile._mirange = j;
 	int8_t obj = dObject[tx][ty];
@@ -3118,10 +3114,7 @@ void MI_Fireball(Missile &missile)
 		}
 	} else {
 		int dam = missile._midam;
-		missile.position.traveled += missile.position.velocity;
-		UpdateMissilePos(missile);
-		if (missile.position.tile != missile.position.start)
-			CheckMissileCol(missile, dam, dam, false, missile.position.tile, false);
+		MoveMissileAndCheckMissileCol(missile, dam, dam, true, false);
 		if (missile._mirange == 0) {
 			Point m = missile.position.tile;
 			ChangeLight(missile._mlid, missile.position.tile, missile._miAnimFrame);
@@ -3274,7 +3267,7 @@ void MI_FireRing(Missile &missile)
 			continue;
 		}
 
-		AddMissile(target, target, DIR_S, MIS_FIREWALL, TARGET_BOTH, src, dmg, missile._mispllvl);
+		AddMissile(target, target, Direction::South, MIS_FIREWALL, TARGET_BOTH, src, dmg, missile._mispllvl);
 	}
 }
 
@@ -3334,7 +3327,7 @@ void MI_FireNova(Missile &missile)
 	int id = missile._misource;
 	int dam = missile._midam;
 	Point src = missile.position.tile;
-	Direction dir = DIR_S;
+	Direction dir = Direction::South;
 	mienemy_type en = TARGET_PLAYERS;
 	if (id != -1) {
 		dir = Players[id]._pdir;
@@ -3362,7 +3355,7 @@ void MI_SpecArrow(Missile &missile)
 	Point dst = { missile.var1, missile.var2 };
 	int spllvl = missile.var3;
 	missile_id mitype = MIS_ARROW;
-	Direction dir = DIR_S;
+	Direction dir = Direction::South;
 	mienemy_type micaster = TARGET_PLAYERS;
 	if (id != -1) {
 		auto &player = Players[id];
@@ -3512,10 +3505,8 @@ void MI_Firemove(Missile &missile)
 		SetMissDir(missile, 1);
 		missile._miAnimFrame = GenerateRnd(11) + 1;
 	}
-	missile.position.traveled += missile.position.velocity;
-	UpdateMissilePos(missile);
 	int j = missile._mirange;
-	CheckMissileCol(missile, missile._midam, missile._midam, false, missile.position.tile, false);
+	MoveMissileAndCheckMissileCol(missile, missile._midam, missile._midam, false, false);
 	if (missile._miHitFlag)
 		missile._mirange = j;
 	if (missile._mirange == 0) {
@@ -3534,7 +3525,7 @@ void MI_Firemove(Missile &missile)
 		ChangeLight(missile._mlid, missile.position.tile, ExpLight[missile.var2]);
 		missile.var2++;
 	}
-	missile.position.tile += DIR_S;
+	missile.position.tile += Direction::South;
 	missile.position.offset.deltaY -= 32;
 	PutMissile(missile);
 }
@@ -3686,7 +3677,7 @@ void MI_Acidsplat(Missile &missile)
 		missile._miDelFlag = true;
 		int monst = missile._misource;
 		int dam = (Monsters[monst].MData->mLevel >= 2 ? 2 : 1);
-		AddMissile(missile.position.tile, { 0, 0 }, DIR_S, MIS_ACIDPUD, TARGET_PLAYERS, monst, dam, missile._mispllvl);
+		AddMissile(missile.position.tile, { 0, 0 }, Direction::South, MIS_ACIDPUD, TARGET_PLAYERS, monst, dam, missile._mispllvl);
 	} else {
 		PutMissile(missile);
 	}
@@ -3881,8 +3872,8 @@ void MI_Wave(Missile &missile)
 	int id = missile._misource;
 	Point src = missile.position.tile;
 	Direction sd = GetDirection(src, { missile.var1, missile.var2 });
-	Direction dira = left[left[sd]];
-	Direction dirb = right[right[sd]];
+	Direction dira = Left(Left(sd));
+	Direction dirb = Right(Right(sd));
 	Point na = src + sd;
 	int pn = dPiece[na.x][na.y];
 	assert(pn >= 0 && pn <= MAXTILES);
@@ -3923,7 +3914,7 @@ void MI_Nova(Missile &missile)
 	int id = missile._misource;
 	int dam = missile._midam;
 	Point src = missile.position.tile;
-	Direction dir = DIR_S;
+	Direction dir = Direction::South;
 	mienemy_type en = TARGET_PLAYERS;
 	if (id != -1) {
 		dir = Players[id]._pdir;
@@ -4011,7 +4002,7 @@ void MI_Flamec(Missile &missile)
 			AddMissile(
 			    missile.position.tile,
 			    missile.position.start,
-			    DIR_S,
+			    Direction::South,
 			    MIS_FLAME,
 			    missile._micaster,
 			    src,
@@ -4039,10 +4030,10 @@ void MI_Cbolt(Missile &missile)
 			auto md = static_cast<Direction>(missile.var2);
 			switch (BPath[missile._mirnd]) {
 			case -1:
-				md = left[md];
+				md = Left(md);
 				break;
 			case 1:
-				md = right[md];
+				md = Right(md);
 				break;
 			}
 
@@ -4052,9 +4043,7 @@ void MI_Cbolt(Missile &missile)
 		} else {
 			missile.var3--;
 		}
-		missile.position.traveled += missile.position.velocity;
-		UpdateMissilePos(missile);
-		CheckMissileCol(missile, missile._midam, missile._midam, false, missile.position.tile, false);
+		MoveMissileAndCheckMissileCol(missile, missile._midam, missile._midam, false, false);
 		if (missile._miHitFlag) {
 			missile.var1 = 8;
 			missile._mimfnum = 0;
@@ -4062,7 +4051,6 @@ void MI_Cbolt(Missile &missile)
 			missile.position.velocity = {};
 			SetMissAnim(missile, MFILE_LGHNING);
 			missile._mirange = missile._miAnimLen;
-			UpdateMissilePos(missile);
 		}
 		ChangeLight(missile._mlid, missile.position.tile, missile.var1);
 	}
@@ -4077,15 +4065,9 @@ void MI_Hbolt(Missile &missile)
 {
 	missile._mirange--;
 	if (missile._miAnimType != MFILE_HOLYEXPL) {
-		missile.position.traveled += missile.position.velocity;
-		UpdateMissilePos(missile);
 		int dam = missile._midam;
-		if (missile.position.tile != missile.position.start) {
-			CheckMissileCol(missile, dam, dam, false, missile.position.tile, false);
-		}
+		MoveMissileAndCheckMissileCol(missile, dam, dam, true, true);
 		if (missile._mirange == 0) {
-			missile.position.traveled -= missile.position.velocity;
-			UpdateMissilePos(missile);
 			missile._mimfnum = 0;
 			SetMissAnim(missile, MFILE_HOLYEXPL);
 			missile._mirange = missile._miAnimLen - 1;
@@ -4130,10 +4112,8 @@ void MI_Element(Missile &missile)
 			AddUnLight(missile._mlid);
 		}
 	} else {
-		missile.position.traveled += missile.position.velocity;
-		UpdateMissilePos(missile);
+		MoveMissileAndCheckMissileCol(missile, dam, dam, false, false);
 		Point c = missile.position.tile;
-		CheckMissileCol(missile, dam, dam, false, c, false);
 		if (missile.var3 == 0 && c == Point { missile.var4, missile.var5 })
 			missile.var3 = 1;
 		if (missile.var3 == 1) {
@@ -4178,10 +4158,8 @@ void MI_Bonespirit(Missile &missile)
 		}
 		PutMissile(missile);
 	} else {
-		missile.position.traveled += missile.position.velocity;
-		UpdateMissilePos(missile);
+		MoveMissileAndCheckMissileCol(missile, dam, dam, false, false);
 		Point c = missile.position.tile;
-		CheckMissileCol(missile, dam, dam, false, c, false);
 		if (missile.var3 == 0 && c == Point { missile.var4, missile.var5 })
 			missile.var3 = 1;
 		if (missile.var3 == 1) {

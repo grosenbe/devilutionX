@@ -44,7 +44,7 @@ void LoadText(const char *text)
 	char tempstr[1536]; // Longest test is about 768 chars * 2 for unicode
 	strcpy(tempstr, text);
 
-	WordWrapGameString(tempstr, 543, GameFontMed, 2);
+	WordWrapString(tempstr, 543, GameFont30);
 	const string_view paragraphs = tempstr;
 
 	size_t previous = 0;
@@ -102,7 +102,7 @@ void DrawQTextContent(const Surface &out)
 	int y = CalculateTextPosition();
 
 	const int sx = PANEL_X + 48;
-	const int sy = LineHeight / 2 - (y % LineHeight);
+	const int sy = 0 - (y % LineHeight);
 
 	const unsigned int skipLines = y / LineHeight;
 
@@ -117,33 +117,23 @@ void DrawQTextContent(const Surface &out)
 			continue;
 		}
 
-		DrawString(out, line, { { sx, sy + i * LineHeight }, { 543, LineHeight } }, UiFlags::FontMedium, 2);
+		DrawString(out, line, { { sx, sy + i * LineHeight }, { 543, LineHeight } }, UiFlags::FontSize30);
 	}
 }
 
 } // namespace
 
-/**
- * @brief Free the resouces used by the quest dialog window
- */
 void FreeQuestText()
 {
 	pTextBoxCels = std::nullopt;
 }
 
-/**
- * @brief Load the resouces used by the quest dialog window, and initialize it's state
- */
 void InitQuestText()
 {
 	pTextBoxCels = LoadCel("Data\\TextBox.CEL", 591);
 	qtextflag = false;
 }
 
-/**
- * @brief Start the given naration
- * @param m Index of narration from the Texts table
- */
 void InitQTextMsg(_speech_id m)
 {
 	if (Speeches[m].scrlltxt) {

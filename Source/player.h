@@ -159,6 +159,11 @@ struct PlayerAnimationData {
 	 *        Is referenced from CelSprite in CelSpritesForDirections
 	 */
 	std::unique_ptr<byte[]> RawData;
+
+	inline const std::optional<CelSprite> &GetCelSpritesForDirection(Direction direction) const
+	{
+		return CelSpritesForDirections[static_cast<size_t>(direction)];
+	}
 };
 
 struct Player {
@@ -544,7 +549,7 @@ struct Player {
 	void ReadySpellFromEquipment(inv_body_loc bodyLocation)
 	{
 		auto &item = InvBody[bodyLocation];
-		if (item._itype == ITYPE_STAFF && item._iSpell != SPL_NULL && item._iCharges > 0) {
+		if (item._itype == ItemType::Staff && item._iSpell != SPL_NULL && item._iCharges > 0) {
 			_pRSpell = item._iSpell;
 			_pRSplType = RSPLTYPE_CHARGES;
 			force_redraw = 255;
@@ -576,6 +581,7 @@ struct Player {
 };
 
 extern int MyPlayerId;
+extern Player *MyPlayer;
 extern Player Players[MAX_PLRS];
 extern bool MyPlayerIsDead;
 extern int BlockBonuses[enum_size<HeroClass>::value];

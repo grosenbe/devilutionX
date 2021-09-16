@@ -912,7 +912,7 @@ void DiabloInitScreen()
 		SetCursorPos(MousePosition);
 	ScrollInfo.tile = { 0, 0 };
 	ScrollInfo.offset = { 0, 0 };
-	ScrollInfo._sdir = SDIR_NONE;
+	ScrollInfo._sdir = ScrollDirection::None;
 
 	ClrDiabloMsg();
 }
@@ -1006,6 +1006,7 @@ void DiabloDeinit()
 		dx_cleanup(); // Cleanup SDL surfaces stuff, so we have to do it before SDL_Quit().
 	if (was_fonts_init)
 		FontsCleanup();
+	UnloadFonts();
 	if (SDL_WasInit(SDL_INIT_EVERYTHING & ~SDL_INIT_HAPTIC) != 0)
 		SDL_Quit();
 }
@@ -1477,7 +1478,7 @@ void InitKeymapActions()
 		    '1' + i,
 		    [i] {
 			    auto &myPlayer = Players[MyPlayerId];
-			    if (!myPlayer.SpdList[i].isEmpty() && myPlayer.SpdList[i]._itype != ITYPE_GOLD) {
+			    if (!myPlayer.SpdList[i].isEmpty() && myPlayer.SpdList[i]._itype != ItemType::Gold) {
 				    UseInvItem(MyPlayerId, INVITEM_BELT_FIRST + i);
 			    }
 		    },
@@ -1507,6 +1508,28 @@ void InitKeymapActions()
 	    [] { Players[MyPlayerId].Stop(); },
 	    [&]() { return !IsPlayerDead(); },
 	});
+#ifdef _DEBUG
+	keymapper.AddAction({
+	    "DebugToggle",
+	    'X',
+	    [] {
+		    DebugToggle = !DebugToggle;
+	    },
+	    [&]() { return true; },
+	});
+#endif
+}
+
+void LoadGameFonts()
+{
+	LoadFont(GameFont12, ColorSilver, "fonts\\white.trn");
+	LoadFont(GameFont12, ColorGold, "fonts\\whitegold.trn");
+	LoadFont(GameFont12, ColorRed, "fonts\\red.trn");
+	LoadFont(GameFont12, ColorBlue, "fonts\\blue.trn");
+	LoadFont(GameFont12, ColorBlack, "fonts\\black.trn");
+	LoadFont(GameFont30, ColorGold);
+	LoadFont(GameFont46, ColorGold);
+	LoadFont(GameFont46, ColorBlack, "fonts\\black.trn");
 }
 
 } // namespace
@@ -1542,6 +1565,7 @@ bool StartGame(bool bNewGame, bool bSinglePlayer)
 		// Save 2.8 MiB of RAM by freeing all main menu resources
 		// before starting the game.
 		UiDestroy();
+		LoadGameFonts();
 
 		gbSelectProvider = false;
 
@@ -1557,6 +1581,7 @@ bool StartGame(bool bNewGame, bool bSinglePlayer)
 		}
 		RunGameLoop(uMsg);
 		NetClose();
+		UnloadFonts();
 
 		// If the player left the game into the main menu,
 		// initialize main menu resources.
@@ -1825,7 +1850,6 @@ void LoadGameLevel(bool firstflag, lvl_entry lvldir)
 		InitStores();
 		InitAutomapOnce();
 		InitHelp();
-		InitText();
 	}
 
 	SetRndSeed(glSeedTbl[currlevel]);

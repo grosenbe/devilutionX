@@ -1475,11 +1475,11 @@ void UpdateCircle(int i)
 		ObjChangeMapResync(Objects[i]._oVar1, Objects[i]._oVar2, Objects[i]._oVar3, Objects[i]._oVar4);
 		if (Quests[Q_BETRAYER]._qactive == QUEST_ACTIVE && Quests[Q_BETRAYER]._qvar1 <= 4) // BUGFIX stepping on the circle again will break the quest state (fixed)
 			Quests[Q_BETRAYER]._qvar1 = 4;
-		AddMissile(myPlayer.position.tile, { 35, 46 }, DIR_S, MIS_RNDTELEPORT, TARGET_BOTH, MyPlayerId, 0, 0);
+		AddMissile(myPlayer.position.tile, { 35, 46 }, Direction::South, MIS_RNDTELEPORT, TARGET_BOTH, MyPlayerId, 0, 0);
 		LastMouseButtonAction = MouseActionType::None;
 		sgbMouseDown = CLICK_NONE;
 		ClrPlrPath(myPlayer);
-		StartStand(MyPlayerId, DIR_S);
+		StartStand(MyPlayerId, Direction::South);
 	}
 }
 
@@ -1612,9 +1612,9 @@ void ObjSetMini(Point position, int v)
 	Point megaOrigin = position * 2 + Displacement { 16, 16 };
 
 	ObjSetMicro(megaOrigin, SDL_SwapLE16(mega.micro1) + 1);
-	ObjSetMicro(megaOrigin + DIR_SE, SDL_SwapLE16(mega.micro2) + 1);
-	ObjSetMicro(megaOrigin + DIR_SW, SDL_SwapLE16(mega.micro3) + 1);
-	ObjSetMicro(megaOrigin + DIR_S, SDL_SwapLE16(mega.micro4) + 1);
+	ObjSetMicro(megaOrigin + Direction::SouthEast, SDL_SwapLE16(mega.micro2) + 1);
+	ObjSetMicro(megaOrigin + Direction::SouthWest, SDL_SwapLE16(mega.micro3) + 1);
+	ObjSetMicro(megaOrigin + Direction::South, SDL_SwapLE16(mega.micro4) + 1);
 }
 
 void ObjL1Special(int x1, int y1, int x2, int y2)
@@ -1836,10 +1836,10 @@ void OperateL1RDoor(int pnum, int oi, bool sendflag)
 		} else {
 			dSpecial[door.position.x][door.position.y] = 2;
 		}
-		SetDoorPiece(door.position + Direction::DIR_NE);
+		SetDoorPiece(door.position + Direction::NorthEast);
 		door._oAnimFrame += 2;
 		door._oPreFlag = true;
-		DoorSet(door.position + Direction::DIR_NW, false);
+		DoorSet(door.position + Direction::NorthWest, false);
 		door._oVar4 = 1;
 		door._oSelFlag = 2;
 		RedoPlayerVision();
@@ -1859,25 +1859,21 @@ void OperateL1RDoor(int pnum, int oi, bool sendflag)
 		door._oVar4 = 0;
 		door._oSelFlag = 3;
 		ObjSetMicro(door.position, door._oVar1);
+
+		// Restore the normal tile where the open door used to be
+		auto openPosition = door.position + Direction::NorthWest;
 		if (currlevel < 17) {
-			if (door._oVar2 != 50) {
-				ObjSetMicro(door.position + Direction::DIR_NW, door._oVar2);
-			} else {
-				if (dPiece[door.position.x - 1][door.position.y] == 396)
-					ObjSetMicro(door.position + Direction::DIR_NW, 411);
-				else
-					ObjSetMicro(door.position + Direction::DIR_NW, 50);
-			}
+			if (door._oVar2 == 50 && dPiece[openPosition.x][openPosition.y] == 396)
+				ObjSetMicro(openPosition, 411);
+			else
+				ObjSetMicro(openPosition, door._oVar2);
 		} else {
-			if (door._oVar2 != 86) {
-				ObjSetMicro(door.position + Direction::DIR_NW, door._oVar2);
-			} else {
-				if (dPiece[door.position.x - 1][door.position.y] == 210)
-					ObjSetMicro(door.position + Direction::DIR_NW, 232);
-				else
-					ObjSetMicro(door.position + Direction::DIR_NW, 86);
-			}
+			if (door._oVar2 == 86 && dPiece[openPosition.x][openPosition.y] == 210)
+				ObjSetMicro(openPosition, 232);
+			else
+				ObjSetMicro(openPosition, door._oVar2);
 		}
+
 		dSpecial[door.position.x][door.position.y] = 0;
 		door._oAnimFrame -= 2;
 		door._oPreFlag = false;
@@ -1917,10 +1913,10 @@ void OperateL1LDoor(int pnum, int oi, bool sendflag)
 		} else {
 			dSpecial[door.position.x][door.position.y] = 1;
 		}
-		SetDoorPiece(door.position + Direction::DIR_NW);
+		SetDoorPiece(door.position + Direction::NorthWest);
 		door._oAnimFrame += 2;
 		door._oPreFlag = true;
-		DoorSet(door.position + Direction::DIR_NE, true);
+		DoorSet(door.position + Direction::NorthEast, true);
 		door._oVar4 = 1;
 		door._oSelFlag = 2;
 		RedoPlayerVision();
@@ -1940,25 +1936,21 @@ void OperateL1LDoor(int pnum, int oi, bool sendflag)
 		door._oVar4 = 0;
 		door._oSelFlag = 3;
 		ObjSetMicro(door.position, door._oVar1);
+
+		// Restore the normal tile where the open door used to be
+		auto openPosition = door.position + Direction::NorthEast;
 		if (currlevel < 17) {
-			if (door._oVar2 != 50) {
-				ObjSetMicro(door.position + Direction::DIR_NE, door._oVar2);
-			} else {
-				if (dPiece[door.position.x][door.position.y - 1] == 396)
-					ObjSetMicro(door.position + Direction::DIR_NE, 412);
-				else
-					ObjSetMicro(door.position + Direction::DIR_NE, 50);
-			}
+			if (door._oVar2 == 50 && dPiece[openPosition.x][openPosition.y] == 396)
+				ObjSetMicro(openPosition, 412);
+			else
+				ObjSetMicro(openPosition, door._oVar2);
 		} else {
-			if (door._oVar2 != 86) {
-				ObjSetMicro(door.position + Direction::DIR_NE, door._oVar2);
-			} else {
-				if (dPiece[door.position.x][door.position.y - 1] == 210)
-					ObjSetMicro(door.position + Direction::DIR_NE, 234);
-				else
-					ObjSetMicro(door.position + Direction::DIR_NE, 86);
-			}
+			if (door._oVar2 == 86 && dPiece[openPosition.x][openPosition.y] == 210)
+				ObjSetMicro(openPosition, 234);
+			else
+				ObjSetMicro(openPosition, door._oVar2);
 		}
+
 		dSpecial[door.position.x][door.position.y] = 0;
 		door._oAnimFrame -= 2;
 		door._oPreFlag = false;
@@ -2208,7 +2200,7 @@ void OperateBook(int pnum, int i)
 			}
 			if (doAddMissile) {
 				Objects[dObject[35][36] - 1]._oVar5++;
-				AddMissile(player.position.tile, { dx, dy }, DIR_S, MIS_RNDTELEPORT, TARGET_BOTH, pnum, 0, 0);
+				AddMissile(player.position.tile, { dx, dy }, Direction::South, MIS_RNDTELEPORT, TARGET_BOTH, pnum, 0, 0);
 				missileAdded = true;
 				doAddMissile = false;
 			}
@@ -2459,17 +2451,17 @@ void OperateSlainHero(int pnum, int i)
 	auto &player = Players[pnum];
 
 	if (player._pClass == HeroClass::Warrior) {
-		CreateMagicArmor(Objects[i].position, ITYPE_HARMOR, ICURS_BREAST_PLATE, false, true);
+		CreateMagicArmor(Objects[i].position, ItemType::HeavyArmor, ICURS_BREAST_PLATE, false, true);
 	} else if (player._pClass == HeroClass::Rogue) {
-		CreateMagicWeapon(Objects[i].position, ITYPE_BOW, ICURS_LONG_WAR_BOW, false, true);
+		CreateMagicWeapon(Objects[i].position, ItemType::Bow, ICURS_LONG_WAR_BOW, false, true);
 	} else if (player._pClass == HeroClass::Sorcerer) {
 		CreateSpellBook(Objects[i].position, SPL_LIGHTNING, false, true);
 	} else if (player._pClass == HeroClass::Monk) {
-		CreateMagicWeapon(Objects[i].position, ITYPE_STAFF, ICURS_WAR_STAFF, false, true);
+		CreateMagicWeapon(Objects[i].position, ItemType::Staff, ICURS_WAR_STAFF, false, true);
 	} else if (player._pClass == HeroClass::Bard) {
-		CreateMagicWeapon(Objects[i].position, ITYPE_SWORD, ICURS_BASTARD_SWORD, false, true);
+		CreateMagicWeapon(Objects[i].position, ItemType::Sword, ICURS_BASTARD_SWORD, false, true);
 	} else if (player._pClass == HeroClass::Barbarian) {
-		CreateMagicWeapon(Objects[i].position, ITYPE_AXE, ICURS_BATTLE_AXE, false, true);
+		CreateMagicWeapon(Objects[i].position, ItemType::Axe, ICURS_BATTLE_AXE, false, true);
 	}
 	Players[MyPlayerId].Say(HeroSpeech::RestInPeaceMyFriend);
 	if (pnum == MyPlayerId)
@@ -2681,20 +2673,20 @@ bool OperateShrineGloomy(int pnum)
 	// Increment armor class by 2 and decrements max damage by 1.
 	for (Item &item : PlayerItemsRange(player)) {
 		switch (item._itype) {
-		case ITYPE_SWORD:
-		case ITYPE_AXE:
-		case ITYPE_BOW:
-		case ITYPE_MACE:
-		case ITYPE_STAFF:
+		case ItemType::Sword:
+		case ItemType::Axe:
+		case ItemType::Bow:
+		case ItemType::Mace:
+		case ItemType::Staff:
 			item._iMaxDam--;
 			if (item._iMaxDam < item._iMinDam)
 				item._iMaxDam = item._iMinDam;
 			break;
-		case ITYPE_SHIELD:
-		case ITYPE_HELM:
-		case ITYPE_LARMOR:
-		case ITYPE_MARMOR:
-		case ITYPE_HARMOR:
+		case ItemType::Shield:
+		case ItemType::Helm:
+		case ItemType::LightArmor:
+		case ItemType::MediumArmor:
+		case ItemType::HeavyArmor:
 			item._iAC += 2;
 			break;
 		default:
@@ -2716,18 +2708,18 @@ bool OperateShrineWeird(int pnum)
 
 	auto &player = Players[pnum];
 
-	if (!player.InvBody[INVLOC_HAND_LEFT].isEmpty() && player.InvBody[INVLOC_HAND_LEFT]._itype != ITYPE_SHIELD)
+	if (!player.InvBody[INVLOC_HAND_LEFT].isEmpty() && player.InvBody[INVLOC_HAND_LEFT]._itype != ItemType::Shield)
 		player.InvBody[INVLOC_HAND_LEFT]._iMaxDam++;
-	if (!player.InvBody[INVLOC_HAND_RIGHT].isEmpty() && player.InvBody[INVLOC_HAND_RIGHT]._itype != ITYPE_SHIELD)
+	if (!player.InvBody[INVLOC_HAND_RIGHT].isEmpty() && player.InvBody[INVLOC_HAND_RIGHT]._itype != ItemType::Shield)
 		player.InvBody[INVLOC_HAND_RIGHT]._iMaxDam++;
 
 	for (int j = 0; j < player._pNumInv; j++) {
 		switch (player.InvList[j]._itype) {
-		case ITYPE_SWORD:
-		case ITYPE_AXE:
-		case ITYPE_BOW:
-		case ITYPE_MACE:
-		case ITYPE_STAFF:
+		case ItemType::Sword:
+		case ItemType::Axe:
+		case ItemType::Bow:
+		case ItemType::Mace:
+		case ItemType::Staff:
 			player.InvList[j]._iMaxDam++;
 			break;
 		default:
@@ -2775,15 +2767,15 @@ bool OperateShrineStone(int pnum)
 	auto &player = Players[pnum];
 
 	for (auto &item : player.InvBody) {
-		if (item._itype == ITYPE_STAFF)
+		if (item._itype == ItemType::Staff)
 			item._iCharges = item._iMaxCharges;
 	}
 	for (int j = 0; j < player._pNumInv; j++) {
-		if (player.InvList[j]._itype == ITYPE_STAFF)
+		if (player.InvList[j]._itype == ItemType::Staff)
 			player.InvList[j]._iCharges = player.InvList[j]._iMaxCharges;
 	}
 	for (auto &item : player.SpdList) {
-		if (item._itype == ITYPE_STAFF)
+		if (item._itype == ItemType::Staff)
 			item._iCharges = item._iMaxCharges; // belt items don't have charges?
 	}
 
@@ -2954,7 +2946,7 @@ bool OperateShrineEldritch(int pnum)
 	auto &player = Players[pnum];
 
 	for (int j = 0; j < player._pNumInv; j++) {
-		if (player.InvList[j]._itype == ITYPE_MISC) {
+		if (player.InvList[j]._itype == ItemType::Misc) {
 			if (player.InvList[j]._iMiscId == IMISC_HEAL
 			    || player.InvList[j]._iMiscId == IMISC_MANA) {
 				SetPlrHandItem(player.HoldItem, ItemMiscIdIdx(IMISC_REJUV));
@@ -2972,7 +2964,7 @@ bool OperateShrineEldritch(int pnum)
 		}
 	}
 	for (auto &item : player.SpdList) {
-		if (item._itype == ITYPE_MISC) {
+		if (item._itype == ItemType::Misc) {
 			if (item._iMiscId == IMISC_HEAL
 			    || item._iMiscId == IMISC_MANA) {
 				SetPlrHandItem(player.HoldItem, ItemMiscIdIdx(IMISC_REJUV));
@@ -3028,11 +3020,11 @@ bool OperateShrineDivine(int pnum, Point spawnPosition)
 	auto &player = Players[pnum];
 
 	if (currlevel < 4) {
-		CreateTypeItem(spawnPosition, false, ITYPE_MISC, IMISC_FULLMANA, false, true);
-		CreateTypeItem(spawnPosition, false, ITYPE_MISC, IMISC_FULLHEAL, false, true);
+		CreateTypeItem(spawnPosition, false, ItemType::Misc, IMISC_FULLMANA, false, true);
+		CreateTypeItem(spawnPosition, false, ItemType::Misc, IMISC_FULLHEAL, false, true);
 	} else {
-		CreateTypeItem(spawnPosition, false, ITYPE_MISC, IMISC_FULLREJUV, false, true);
-		CreateTypeItem(spawnPosition, false, ITYPE_MISC, IMISC_FULLREJUV, false, true);
+		CreateTypeItem(spawnPosition, false, ItemType::Misc, IMISC_FULLREJUV, false, true);
+		CreateTypeItem(spawnPosition, false, ItemType::Misc, IMISC_FULLREJUV, false, true);
 	}
 
 	player._pMana = player._pMaxMana;
@@ -3050,7 +3042,7 @@ bool OperateShrineHoly(int pnum)
 	if (deltaload)
 		return false;
 
-	AddMissile(Players[pnum].position.tile, { 0, 0 }, DIR_S, MIS_RNDTELEPORT, TARGET_PLAYERS, pnum, 0, 2 * leveltype);
+	AddMissile(Players[pnum].position.tile, { 0, 0 }, Direction::South, MIS_RNDTELEPORT, TARGET_PLAYERS, pnum, 0, 2 * leveltype);
 
 	if (pnum != MyPlayerId)
 		return false;
@@ -3733,9 +3725,9 @@ void OperateSkelBook(int pnum, int i, bool sendmsg)
 	}
 	SetRndSeed(Objects[i]._oRndSeed);
 	if (GenerateRnd(5) != 0)
-		CreateTypeItem(Objects[i].position, false, ITYPE_MISC, IMISC_SCROLL, sendmsg, false);
+		CreateTypeItem(Objects[i].position, false, ItemType::Misc, IMISC_SCROLL, sendmsg, false);
 	else
-		CreateTypeItem(Objects[i].position, false, ITYPE_MISC, IMISC_BOOK, sendmsg, false);
+		CreateTypeItem(Objects[i].position, false, ItemType::Misc, IMISC_BOOK, sendmsg, false);
 	if (pnum == MyPlayerId)
 		NetSendCmdParam1(false, CMD_OPERATEOBJ, i);
 }
@@ -3754,7 +3746,7 @@ void OperateBookCase(int pnum, int i, bool sendmsg)
 		return;
 	}
 	SetRndSeed(Objects[i]._oRndSeed);
-	CreateTypeItem(Objects[i].position, false, ITYPE_MISC, IMISC_BOOK, sendmsg, false);
+	CreateTypeItem(Objects[i].position, false, ItemType::Misc, IMISC_BOOK, sendmsg, false);
 
 	if (Quests[Q_ZHAR].IsAvailable()) {
 		auto &zhar = Monsters[MAX_PLRS];
@@ -3800,15 +3792,15 @@ void OperateArmorStand(int pnum, int i, bool sendmsg)
 	SetRndSeed(Objects[i]._oRndSeed);
 	bool uniqueRnd = (GenerateRnd(2) != 0);
 	if (currlevel <= 5) {
-		CreateTypeItem(Objects[i].position, true, ITYPE_LARMOR, IMISC_NONE, sendmsg, false);
+		CreateTypeItem(Objects[i].position, true, ItemType::LightArmor, IMISC_NONE, sendmsg, false);
 	} else if (currlevel >= 6 && currlevel <= 9) {
-		CreateTypeItem(Objects[i].position, uniqueRnd, ITYPE_MARMOR, IMISC_NONE, sendmsg, false);
+		CreateTypeItem(Objects[i].position, uniqueRnd, ItemType::MediumArmor, IMISC_NONE, sendmsg, false);
 	} else if (currlevel >= 10 && currlevel <= 12) {
-		CreateTypeItem(Objects[i].position, false, ITYPE_HARMOR, IMISC_NONE, sendmsg, false);
+		CreateTypeItem(Objects[i].position, false, ItemType::HeavyArmor, IMISC_NONE, sendmsg, false);
 	} else if (currlevel >= 13 && currlevel <= 16) {
-		CreateTypeItem(Objects[i].position, true, ITYPE_HARMOR, IMISC_NONE, sendmsg, false);
+		CreateTypeItem(Objects[i].position, true, ItemType::HeavyArmor, IMISC_NONE, sendmsg, false);
 	} else if (currlevel >= 17) {
-		CreateTypeItem(Objects[i].position, true, ITYPE_HARMOR, IMISC_NONE, sendmsg, false);
+		CreateTypeItem(Objects[i].position, true, ItemType::HeavyArmor, IMISC_NONE, sendmsg, false);
 	}
 	if (pnum == MyPlayerId)
 		NetSendCmdParam1(false, CMD_OPERATEOBJ, i);
@@ -3974,26 +3966,11 @@ bool OperateFountains(int pnum, int i)
 
 void OperateWeaponRack(int pnum, int i, bool sendmsg)
 {
-	int weaponType;
-
 	if (Objects[i]._oSelFlag == 0)
 		return;
 	SetRndSeed(Objects[i]._oRndSeed);
 
-	switch (GenerateRnd(4) + ITYPE_SWORD) {
-	case ITYPE_SWORD:
-		weaponType = ITYPE_SWORD;
-		break;
-	case ITYPE_AXE:
-		weaponType = ITYPE_AXE;
-		break;
-	case ITYPE_BOW:
-		weaponType = ITYPE_BOW;
-		break;
-	case ITYPE_MACE:
-		weaponType = ITYPE_MACE;
-		break;
-	}
+	ItemType weaponType { PickRandomlyAmong({ ItemType::Sword, ItemType::Axe, ItemType::Bow, ItemType::Mace }) };
 
 	Objects[i]._oSelFlag = 0;
 	Objects[i]._oAnimFrame++;
@@ -4299,25 +4276,25 @@ void SyncL1Doors(Object &door)
 		if (isLeftDoor) {
 			ObjSetMicro(door.position, door._oVar1 == 214 ? 408 : 393);
 			dSpecial[door.position.x][door.position.y] = 7;
-			SetDoorPiece(door.position + Direction::DIR_NW);
-			DoorSet(door.position + Direction::DIR_NE, isLeftDoor);
+			SetDoorPiece(door.position + Direction::NorthWest);
+			DoorSet(door.position + Direction::NorthEast, isLeftDoor);
 		} else {
 			ObjSetMicro(door.position, 395);
 			dSpecial[door.position.x][door.position.y] = 8;
-			SetDoorPiece(door.position + Direction::DIR_NE);
-			DoorSet(door.position + Direction::DIR_NW, isLeftDoor);
+			SetDoorPiece(door.position + Direction::NorthEast);
+			DoorSet(door.position + Direction::NorthWest, isLeftDoor);
 		}
 	} else {
 		if (isLeftDoor) {
 			ObjSetMicro(door.position, 206);
 			dSpecial[door.position.x][door.position.y] = 1;
-			SetDoorPiece(door.position + Direction::DIR_NW);
-			DoorSet(door.position + Direction::DIR_NE, isLeftDoor);
+			SetDoorPiece(door.position + Direction::NorthWest);
+			DoorSet(door.position + Direction::NorthEast, isLeftDoor);
 		} else {
 			ObjSetMicro(door.position, 209);
 			dSpecial[door.position.x][door.position.y] = 2;
-			SetDoorPiece(door.position + Direction::DIR_NE);
-			DoorSet(door.position + Direction::DIR_NW, isLeftDoor);
+			SetDoorPiece(door.position + Direction::NorthEast);
+			DoorSet(door.position + Direction::NorthWest, isLeftDoor);
 		}
 	}
 }

@@ -212,7 +212,7 @@ void LoadItemData(LoadHelper &file, Item &item)
 	item._iSeed = file.NextLE<int32_t>();
 	item._iCreateInfo = file.NextLE<uint16_t>();
 	file.Skip(2); // Alignment
-	item._itype = static_cast<item_type>(file.NextLE<uint32_t>());
+	item._itype = static_cast<ItemType>(file.NextLE<uint32_t>());
 	item.position.x = file.NextLE<int32_t>();
 	item.position.y = file.NextLE<int32_t>();
 	item._iAnimFlag = file.NextBool32();
@@ -685,6 +685,7 @@ void LoadMissile(LoadHelper *file, Missile &missile)
 	missile.var6 = file->NextLE<int32_t>();
 	missile.var7 = file->NextLE<int32_t>();
 	missile.limitReached = file->NextBool32();
+	missile.lastCollisionTargetHash = 0;
 }
 
 void LoadObject(LoadHelper &file, Object &object)
@@ -879,16 +880,16 @@ void SaveItem(SaveHelper &file, const Item &item)
 		idx = RemapItemIdxToDiablo(idx);
 	if (gbIsSpawn)
 		idx = RemapItemIdxToSpawn(idx);
-	int iType = item._itype;
+	ItemType iType = item._itype;
 	if (idx == -1) {
 		idx = _item_indexes::IDI_GOLD;
-		iType = ITYPE_NONE;
+		iType = ItemType::None;
 	}
 
 	file.WriteLE<int32_t>(item._iSeed);
 	file.WriteLE<int16_t>(item._iCreateInfo);
 	file.Skip(2); // Alignment
-	file.WriteLE<int32_t>(iType);
+	file.WriteLE<int32_t>(static_cast<int32_t>(iType));
 	file.WriteLE<int32_t>(item.position.x);
 	file.WriteLE<int32_t>(item.position.y);
 	file.WriteLE<uint32_t>(item._iAnimFlag ? 1 : 0);
@@ -975,7 +976,7 @@ void SavePlayer(SaveHelper &file, const Player &player)
 	file.WriteLE<int32_t>(player.destAction);
 	file.WriteLE<int32_t>(player.destParam1);
 	file.WriteLE<int32_t>(player.destParam2);
-	file.WriteLE<int32_t>(player.destParam3);
+	file.WriteLE<int32_t>(static_cast<int32_t>(player.destParam3));
 	file.WriteLE<int32_t>(player.destParam4);
 	file.WriteLE<int32_t>(player.plrlevel);
 	file.WriteLE<int32_t>(player.position.tile.x);
@@ -996,7 +997,7 @@ void SavePlayer(SaveHelper &file, const Player &player)
 	file.WriteLE<int32_t>(player.position.offset.deltaY);
 	file.WriteLE<int32_t>(player.position.velocity.deltaX);
 	file.WriteLE<int32_t>(player.position.velocity.deltaY);
-	file.WriteLE<int32_t>(player._pdir);
+	file.WriteLE<int32_t>(static_cast<int32_t>(player._pdir));
 	file.Skip(4); // Unused
 	file.WriteLE<int32_t>(player._pgfxnum);
 	file.Skip(4); // Skip pointer _pAnimData
@@ -1088,7 +1089,7 @@ void SavePlayer(SaveHelper &file, const Player &player)
 	file.WriteLE<uint32_t>(player._pInfraFlag ? 1 : 0);
 	file.WriteLE<int32_t>(player.position.temp.x);
 	file.WriteLE<int32_t>(player.position.temp.y);
-	file.WriteLE<int32_t>(player.tempDirection);
+	file.WriteLE<int32_t>(static_cast<int32_t>(player.tempDirection));
 	file.WriteLE<int32_t>(player._pVar4);
 	file.WriteLE<int32_t>(player._pVar5);
 	file.WriteLE<int32_t>(player.position.offset2.deltaX);
@@ -1219,7 +1220,7 @@ void SaveMonster(SaveHelper *file, Monster &monster)
 	file->WriteLE<int32_t>(monster.position.offset.deltaY);
 	file->WriteLE<int32_t>(monster.position.velocity.deltaX);
 	file->WriteLE<int32_t>(monster.position.velocity.deltaY);
-	file->WriteLE<int32_t>(monster._mdir);
+	file->WriteLE<int32_t>(static_cast<int32_t>(monster._mdir));
 	file->WriteLE<int32_t>(monster._menemy);
 	file->WriteLE<uint8_t>(monster.enemyPosition.x);
 	file->WriteLE<uint8_t>(monster.enemyPosition.y);
@@ -1444,7 +1445,7 @@ void RemoveInvalidItem(Item &item)
 	bool isInvalid = !IsItemAvailable(item.IDidx) || !IsUniqueAvailable(item._iUid);
 
 	if (!gbIsHellfire) {
-		isInvalid = isInvalid || (item._itype == ITYPE_STAFF && GetSpellStaffLevel(item._iSpell) == -1);
+		isInvalid = isInvalid || (item._itype == ItemType::Staff && GetSpellStaffLevel(item._iSpell) == -1);
 		isInvalid = isInvalid || (item._iMiscId == IMISC_BOOK && GetSpellBookLevel(item._iSpell) == -1);
 		isInvalid = isInvalid || item._iDamAcFlags != 0;
 		isInvalid = isInvalid || item._iPrePower > IDI_LASTDIABLO;
@@ -1452,7 +1453,7 @@ void RemoveInvalidItem(Item &item)
 	}
 
 	if (isInvalid) {
-		item._itype = ITYPE_NONE;
+		item._itype = ItemType::None;
 	}
 }
 
@@ -1645,10 +1646,6 @@ void RemoveEmptyInventory(Player &player)
 	}
 }
 
-/**
- * @brief Load game state
- * @param firstflag Can be set to false if we are simply reloading the current game
- */
 void LoadGame(bool firstflag)
 {
 	FreeGameMem();

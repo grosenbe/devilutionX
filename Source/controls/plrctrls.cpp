@@ -59,8 +59,8 @@ int GetRotaryDistance(Point destination)
 	if (myPlayer.position.future == destination)
 		return -1;
 
-	int d1 = myPlayer._pdir;
-	int d2 = GetDirection(myPlayer.position.future, destination);
+	int d1 = static_cast<int>(myPlayer._pdir);
+	int d2 = static_cast<int>(GetDirection(myPlayer.position.future, destination));
 
 	int d = abs(d1 - d2);
 	if (d > 4)
@@ -686,7 +686,7 @@ void InvMove(AxisDirection dir)
 			} else if (Slot > SLOTXY_BELT_FIRST && Slot <= SLOTXY_BELT_LAST) {
 				Slot -= 1;
 				mousePos = BeltGetSlotCoord(Slot);
-			} else if (myPlayer.HoldItem._itype == ITYPE_RING) {
+			} else if (myPlayer.HoldItem._itype == ItemType::Ring) {
 				Slot = SLOTXY_RING_LEFT;
 				mousePos = InvGetEquipSlotCoord(INVLOC_RING_LEFT);
 			} else if (myPlayer.HoldItem.isWeapon() || myPlayer.HoldItem.isShield()) {
@@ -736,7 +736,7 @@ void InvMove(AxisDirection dir)
 			} else if (Slot >= SLOTXY_BELT_FIRST && Slot < SLOTXY_BELT_LAST) {
 				Slot += 1;
 				mousePos = BeltGetSlotCoord(Slot);
-			} else if (myPlayer.HoldItem._itype == ITYPE_RING) {
+			} else if (myPlayer.HoldItem._itype == ItemType::Ring) {
 				Slot = SLOTXY_RING_RIGHT;
 				mousePos = InvGetEquipSlotCoord(INVLOC_RING_RIGHT);
 			} else if (myPlayer.HoldItem.isWeapon() || myPlayer.HoldItem.isShield()) {
@@ -781,7 +781,7 @@ void InvMove(AxisDirection dir)
 				Slot -= INV_ROW_SLOT_SIZE;
 				mousePos = InvGetSlotCoord(Slot);
 			} else if (Slot >= SLOTXY_INV_FIRST) {
-				if (myPlayer.HoldItem._itype == ITYPE_RING) {
+				if (myPlayer.HoldItem._itype == ItemType::Ring) {
 					if (Slot >= SLOTXY_INV_ROW1_FIRST && Slot <= SLOTXY_INV_ROW1_FIRST + (INV_ROW_SLOT_SIZE / 2) - 1) {
 						Slot = SLOTXY_RING_LEFT;
 						mousePos = InvGetEquipSlotCoord(INVLOC_RING_LEFT);
@@ -801,7 +801,7 @@ void InvMove(AxisDirection dir)
 				} else if (myPlayer.HoldItem.isArmor()) {
 					Slot = SLOTXY_CHEST_FIRST;
 					mousePos = InvGetEquipSlotCoord(INVLOC_CHEST);
-				} else if (myPlayer.HoldItem._itype == ITYPE_AMULET) {
+				} else if (myPlayer.HoldItem._itype == ItemType::Amulet) {
 					Slot = SLOTXY_AMULET;
 					mousePos = InvGetEquipSlotCoord(INVLOC_AMULET);
 				}
@@ -847,7 +847,7 @@ void InvMove(AxisDirection dir)
 			} else if (Slot <= (SLOTXY_INV_ROW4_LAST - (icursSize28.height * INV_ROW_SLOT_SIZE))) {
 				Slot += INV_ROW_SLOT_SIZE;
 				mousePos = InvGetSlotCoord(Slot);
-			} else if (Slot <= SLOTXY_INV_LAST && myPlayer.HoldItem._itype == ITYPE_MISC && icursSize28 == Size { 1, 1 }) { // forcing only 1x1 misc items
+			} else if (Slot <= SLOTXY_INV_LAST && myPlayer.HoldItem._itype == ItemType::Misc && icursSize28 == Size { 1, 1 }) { // forcing only 1x1 misc items
 				Slot += INV_ROW_SLOT_SIZE;
 				if (Slot > SLOTXY_BELT_LAST)
 					Slot = SLOTXY_BELT_LAST;
@@ -1006,10 +1006,10 @@ void SpellBookMove(AxisDirection dir)
 }
 
 const Direction FaceDir[3][3] = {
-	// NONE      UP      DOWN
-	{ DIR_S, DIR_N, DIR_S },   // NONE
-	{ DIR_W, DIR_NW, DIR_SW }, // LEFT
-	{ DIR_E, DIR_NE, DIR_SE }, // RIGHT
+	// NONE             UP                DOWN
+	{ Direction::South, Direction::North, Direction::South },        // NONE
+	{ Direction::West, Direction::NorthWest, Direction::SouthWest }, // LEFT
+	{ Direction::East, Direction::NorthEast, Direction::SouthEast }, // RIGHT
 };
 
 /**
@@ -1024,32 +1024,11 @@ const Direction FaceDir[3][3] = {
  */
 bool IsPathBlocked(Point position, Direction dir)
 {
-	Direction d1;
-	Direction d2;
+	if (IsNoneOf(dir, Direction::North, Direction::East, Direction::South, Direction::West))
+		return false; // Steps along a major axis don't need to check corners
 
-	switch (dir) {
-	case DIR_N:
-		d1 = DIR_NW;
-		d2 = DIR_NE;
-		break;
-	case DIR_E:
-		d1 = DIR_NE;
-		d2 = DIR_SE;
-		break;
-	case DIR_S:
-		d1 = DIR_SE;
-		d2 = DIR_SW;
-		break;
-	case DIR_W:
-		d1 = DIR_SW;
-		d2 = DIR_NW;
-		break;
-	default:
-		return false;
-	}
-
-	auto leftStep { position + d1 };
-	auto rightStep { position + d2 };
+	auto leftStep { position + Left(dir) };
+	auto rightStep { position + Right(dir) };
 
 	if (IsTileNotSolid(leftStep) && IsTileNotSolid(rightStep))
 		return false;
@@ -1340,7 +1319,7 @@ void UseBeltItem(int type)
 		if ((type == BLT_HEALING && (id == IMISC_HEAL || id == IMISC_FULLHEAL || (id == IMISC_SCROLL && spellId == SPL_HEAL)))
 		    || (type == BLT_MANA && (id == IMISC_MANA || id == IMISC_FULLMANA))
 		    || id == IMISC_REJUV || id == IMISC_FULLREJUV) {
-			if (myPlayer.SpdList[i]._itype > -1) {
+			if (!myPlayer.SpdList[i].isEmpty()) {
 				UseInvItem(MyPlayerId, INVITEM_BELT_FIRST + i);
 				break;
 			}
@@ -1415,10 +1394,10 @@ bool TryDropItem()
 {
 	const auto &myPlayer = Players[MyPlayerId];
 
-	cursPosition = myPlayer.position.future + DIR_SE;
+	cursPosition = myPlayer.position.future + Direction::SouthEast;
 	if (!DropItemBeforeTrig()) {
 		// Try to drop on the other side
-		cursPosition = myPlayer.position.future + DIR_SW;
+		cursPosition = myPlayer.position.future + Direction::SouthWest;
 		DropItemBeforeTrig();
 	}
 

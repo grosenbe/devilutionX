@@ -85,16 +85,6 @@ int topY;
 int lineSpacing;
 int act2finSpacing;
 
-/**
- * Specifies a delta in X-coordinates from the quest entrance for
- * which the hover text of the cursor will be visible.
- */
-char questxoff[7] = { 0, -1, 0, -1, -2, -1, -2 };
-/**
- * Specifies a delta in Y-coordinates from the quest entrance for
- * which the hover text of the cursor will be visible.
- */
-char questyoff[7] = { 0, 0, -1, -1, -1, -2, -2 };
 const char *const QuestTriggerNames[5] = {
 	N_(/* TRANSLATORS: Quest Map*/ "King Leoric's Tomb"),
 	N_(/* TRANSLATORS: Quest Map*/ "The Chamber of Bone"),
@@ -276,14 +266,13 @@ int QuestLogMouseToEntry()
 void PrintQLString(const Surface &out, int x, int y, const char *str, bool marked, bool disabled = false)
 {
 	int width = GetLineWidth(str);
-	int sx = x + std::max((257 - width) / 2, 0);
-	int sy = y + lineHeight; //seems that DrawString y is the text base line -> so add a lines height
+	x += std::max((257 - width) / 2, 0);
 	if (marked) {
-		CelDrawTo(out, GetPanelPosition(UiPanels::Quest, { sx - 20, sy + 1 }), *pSPentSpn2Cels, PentSpn2Spin());
+		CelDrawTo(out, GetPanelPosition(UiPanels::Quest, { x - 20, y + 13 }), *pSPentSpn2Cels, PentSpn2Spin());
 	}
-	DrawString(out, str, { GetPanelPosition(UiPanels::Quest, { sx, sy }), { 257, 0 } }, disabled ? UiFlags::ColorGold : UiFlags::ColorSilver);
+	DrawString(out, str, { GetPanelPosition(UiPanels::Quest, { x, y }), { 257, 0 } }, disabled ? UiFlags::ColorGold : UiFlags::ColorSilver);
 	if (marked) {
-		CelDrawTo(out, GetPanelPosition(UiPanels::Quest, { sx + width + 7, sy + 1 }), *pSPentSpn2Cels, PentSpn2Spin());
+		CelDrawTo(out, GetPanelPosition(UiPanels::Quest, { x + width + 7, y + 13 }), *pSPentSpn2Cels, PentSpn2Spin());
 	}
 }
 
@@ -399,7 +388,7 @@ void CheckQuests()
 		quest.position.y = 2 * quest.position.y + 16;
 		int rportx = quest.position.x;
 		int rporty = quest.position.y;
-		AddMissile({ rportx, rporty }, { rportx, rporty }, DIR_S, MIS_RPORTAL, TARGET_MONSTERS, MyPlayerId, 0, 0);
+		AddMissile({ rportx, rporty }, { rportx, rporty }, Direction::South, MIS_RPORTAL, TARGET_MONSTERS, MyPlayerId, 0, 0);
 		quest._qvar2 = 1;
 		if (quest._qactive == QUEST_ACTIVE) {
 			quest._qvar1 = 3;
@@ -412,7 +401,7 @@ void CheckQuests()
 	    && quest._qvar2 == 4) {
 		int rportx = 35;
 		int rporty = 32;
-		AddMissile({ rportx, rporty }, { rportx, rporty }, DIR_S, MIS_RPORTAL, TARGET_MONSTERS, MyPlayerId, 0, 0);
+		AddMissile({ rportx, rporty }, { rportx, rporty }, Direction::South, MIS_RPORTAL, TARGET_MONSTERS, MyPlayerId, 0, 0);
 		quest._qvar2 = 3;
 	}
 
@@ -456,12 +445,10 @@ bool ForceQuests()
 		if (quest._qidx != Q_BETRAYER && currlevel == quest._qlevel && quest._qslvl != 0) {
 			int ql = quest._qslvl - 1;
 
-			for (int j = 0; j < 7; j++) {
-				if (quest.position + Displacement { questxoff[j], questyoff[j] } == cursPosition) {
-					strcpy(infostr, fmt::format(_(/* TRANSLATORS: Used for Quest Portals. {:s} is a Map Name */ "To {:s}"), _(QuestTriggerNames[ql])).c_str());
-					cursPosition = quest.position;
-					return true;
-				}
+			if (EntranceBoundaryContains(quest.position, cursPosition)) {
+				strcpy(infostr, fmt::format(_(/* TRANSLATORS: Used for Quest Portals. {:s} is a Map Name */ "To {:s}"), _(QuestTriggerNames[ql])).c_str());
+				cursPosition = quest.position;
+				return true;
 			}
 		}
 	}
@@ -522,7 +509,7 @@ void CheckQuestKill(const Monster &monster, bool sendmsg)
 		Quests[Q_BETRAYER]._qvar1 = 7;
 		Quests[Q_BETRAYER]._qvar2 = 4;
 		Quests[Q_DIABLO]._qactive = QUEST_ACTIVE;
-		AddMissile({ 35, 32 }, { 35, 32 }, DIR_S, MIS_RPORTAL, TARGET_MONSTERS, MyPlayerId, 0, 0);
+		AddMissile({ 35, 32 }, { 35, 32 }, Direction::South, MIS_RPORTAL, TARGET_MONSTERS, MyPlayerId, 0, 0);
 		myPlayer.Say(HeroSpeech::YourMadnessEndsHereBetrayer, 30);
 	} else if (monster._uniqtype - 1 == UMT_WARLORD) { //"Warlord of Blood"
 		Quests[Q_WARLORD]._qactive = QUEST_DONE;
@@ -567,24 +554,24 @@ void SetReturnLvlPos()
 {
 	switch (setlvlnum) {
 	case SL_SKELKING:
-		ReturnLvlPosition = Quests[Q_SKELKING].position + DIR_SE;
+		ReturnLvlPosition = Quests[Q_SKELKING].position + Direction::SouthEast;
 		ReturnLevel = Quests[Q_SKELKING]._qlevel;
 		ReturnLevelType = DTYPE_CATHEDRAL;
 		break;
 	case SL_BONECHAMB:
-		ReturnLvlPosition = Quests[Q_SCHAMB].position + DIR_SE;
+		ReturnLvlPosition = Quests[Q_SCHAMB].position + Direction::SouthEast;
 		ReturnLevel = Quests[Q_SCHAMB]._qlevel;
 		ReturnLevelType = DTYPE_CATACOMBS;
 		break;
 	case SL_MAZE:
 		break;
 	case SL_POISONWATER:
-		ReturnLvlPosition = Quests[Q_PWATER].position + DIR_SW;
+		ReturnLvlPosition = Quests[Q_PWATER].position + Direction::SouthWest;
 		ReturnLevel = Quests[Q_PWATER]._qlevel;
 		ReturnLevelType = DTYPE_CATHEDRAL;
 		break;
 	case SL_VILEBETRAYER:
-		ReturnLvlPosition = Quests[Q_BETRAYER].position + DIR_E;
+		ReturnLvlPosition = Quests[Q_BETRAYER].position + Direction::East;
 		ReturnLevel = Quests[Q_BETRAYER]._qlevel;
 		ReturnLevelType = DTYPE_HELL;
 		break;

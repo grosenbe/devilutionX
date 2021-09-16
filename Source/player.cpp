@@ -35,6 +35,7 @@
 namespace devilution {
 
 int MyPlayerId;
+Player *MyPlayer;
 Player Players[MAX_PLRS];
 bool MyPlayerIsDead;
 int deathdelay;
@@ -158,7 +159,7 @@ struct DirectionSettings {
 	Displacement tileAdd;
 	Displacement offset;
 	Displacement map;
-	_scroll_direction scrollDir;
+	ScrollDirection scrollDir;
 	PLR_MODE walkMode;
 	void (*walkModeHandler)(int, const DirectionSettings &);
 };
@@ -295,29 +296,29 @@ _sfx_id herosounds[enum_size<HeroClass>::value][enum_size<HeroSpeech>::value] = 
 
 constexpr std::array<const DirectionSettings, 8> WalkSettings { {
 	// clang-format off
-	{ DIR_S,  {  1,  1 }, {   0, -32 }, { 0, 0 }, SDIR_S,  PM_WALK2, WalkDownwards },
-	{ DIR_SW, {  0,  1 }, {  32, -16 }, { 0, 0 }, SDIR_SW, PM_WALK2, WalkDownwards },
-	{ DIR_W,  { -1,  1 }, {  32, -16 }, { 0, 1 }, SDIR_W,  PM_WALK3, WalkSides     },
-	{ DIR_NW, { -1,  0 }, {   0,   0 }, { 0, 0 }, SDIR_NW, PM_WALK,  WalkUpwards   },
-	{ DIR_N,  { -1, -1 }, {   0,   0 }, { 0, 0 }, SDIR_N,  PM_WALK,  WalkUpwards   },
-	{ DIR_NE, {  0, -1 }, {   0,   0 }, { 0, 0 }, SDIR_NE, PM_WALK,  WalkUpwards   },
-	{ DIR_E,  {  1, -1 }, { -32, -16 }, { 1, 0 }, SDIR_E,  PM_WALK3, WalkSides     },
-	{ DIR_SE, {  1,  0 }, { -32, -16 }, { 0, 0 }, SDIR_SE, PM_WALK2, WalkDownwards }
+	{ Direction::South,     {  1,  1 }, {   0, -32 }, { 0, 0 }, ScrollDirection::South,     PM_WALK2, WalkDownwards },
+	{ Direction::SouthWest, {  0,  1 }, {  32, -16 }, { 0, 0 }, ScrollDirection::SouthWest, PM_WALK2, WalkDownwards },
+	{ Direction::West,      { -1,  1 }, {  32, -16 }, { 0, 1 }, ScrollDirection::West,      PM_WALK3, WalkSides     },
+	{ Direction::NorthWest, { -1,  0 }, {   0,   0 }, { 0, 0 }, ScrollDirection::NorthWest, PM_WALK,  WalkUpwards   },
+	{ Direction::North,     { -1, -1 }, {   0,   0 }, { 0, 0 }, ScrollDirection::North,     PM_WALK,  WalkUpwards   },
+	{ Direction::NorthEast, {  0, -1 }, {   0,   0 }, { 0, 0 }, ScrollDirection::NorthEast, PM_WALK,  WalkUpwards   },
+	{ Direction::East,      {  1, -1 }, { -32, -16 }, { 1, 0 }, ScrollDirection::East,      PM_WALK3, WalkSides     },
+	{ Direction::SouthEast, {  1,  0 }, { -32, -16 }, { 0, 0 }, ScrollDirection::SouthEast, PM_WALK2, WalkDownwards }
 	// clang-format on
 } };
 
-void ScrollViewPort(const Player &player, _scroll_direction dir)
+void ScrollViewPort(const Player &player, ScrollDirection dir)
 {
 	ScrollInfo.tile = Point { 0, 0 } + (player.position.tile - ViewPosition);
 
 	if (zoomflag) {
 		if (abs(ScrollInfo.tile.x) >= 3 || abs(ScrollInfo.tile.y) >= 3) {
-			ScrollInfo._sdir = SDIR_NONE;
+			ScrollInfo._sdir = ScrollDirection::None;
 		} else {
 			ScrollInfo._sdir = dir;
 		}
 	} else if (abs(ScrollInfo.tile.x) >= 2 || abs(ScrollInfo.tile.y) >= 2) {
-		ScrollInfo._sdir = SDIR_NONE;
+		ScrollInfo._sdir = ScrollDirection::None;
 	} else {
 		ScrollInfo._sdir = dir;
 	}
@@ -331,12 +332,12 @@ bool PlrDirOK(const Player &player, Direction dir)
 		return false;
 	}
 
-	if (dir == DIR_E) {
-		return !IsTileSolid(position + DIR_SE) && (dFlags[position.x + 1][position.y] & BFLAG_PLAYERLR) == 0;
+	if (dir == Direction::East) {
+		return !IsTileSolid(position + Direction::SouthEast) && (dFlags[position.x + 1][position.y] & BFLAG_PLAYERLR) == 0;
 	}
 
-	if (dir == DIR_W) {
-		return !IsTileSolid(position + DIR_SW) && (dFlags[position.x][position.y + 1] & BFLAG_PLAYERLR) == 0;
+	if (dir == Direction::West) {
+		return !IsTileSolid(position + Direction::SouthWest) && (dFlags[position.x][position.y + 1] & BFLAG_PLAYERLR) == 0;
 	}
 
 	return true;
@@ -345,7 +346,7 @@ bool PlrDirOK(const Player &player, Direction dir)
 void HandleWalkMode(int pnum, Displacement vel, Direction dir)
 {
 	auto &player = Players[pnum];
-	const auto &dirModeParams = WalkSettings[dir];
+	const auto &dirModeParams = WalkSettings[static_cast<size_t>(dir)];
 	SetPlayerOld(player);
 	if (!PlrDirOK(player, dir)) {
 		return;
@@ -356,7 +357,7 @@ void HandleWalkMode(int pnum, Displacement vel, Direction dir)
 	player.position.future = player.position.tile + dirModeParams.tileAdd;
 
 	if (pnum == MyPlayerId) {
-		ScrollViewPort(player, WalkSettings[dir].scrollDir);
+		ScrollViewPort(player, dirModeParams.scrollDir);
 	}
 
 	dirModeParams.walkModeHandler(pnum, dirModeParams);
@@ -409,7 +410,7 @@ void SetPlayerGPtrs(const char *path, std::unique_ptr<byte[]> &data, std::array<
 void ClearStateVariables(Player &player)
 {
 	player.position.temp = { 0, 0 };
-	player.tempDirection = DIR_S;
+	player.tempDirection = Direction::South;
 	player._pVar4 = 0;
 	player._pVar5 = 0;
 	player.position.offset2 = { 0, 0 };
@@ -429,7 +430,7 @@ void StartWalkStand(int pnum)
 
 	if (pnum == MyPlayerId) {
 		ScrollInfo.offset = { 0, 0 };
-		ScrollInfo._sdir = SDIR_NONE;
+		ScrollInfo._sdir = ScrollDirection::None;
 		ViewPosition = player.position.tile;
 	}
 }
@@ -455,7 +456,7 @@ void ChangeOffset(int pnum)
 	px -= player.position.offset2.deltaX >> 8;
 	py -= player.position.offset2.deltaY >> 8;
 
-	if (pnum == MyPlayerId && ScrollInfo._sdir != SDIR_NONE) {
+	if (pnum == MyPlayerId && ScrollInfo._sdir != ScrollDirection::None) {
 		ScrollInfo.offset += { px, py };
 	}
 
@@ -581,7 +582,7 @@ void RespawnDeadItem(Item *itm, Point target)
 	Items[ii].position = target;
 	RespawnItem(&Items[ii], true);
 
-	itm->_itype = ITYPE_NONE;
+	itm->_itype = ItemType::None;
 }
 
 void DeadItem(Player &player, Item *itm, Displacement direction)
@@ -619,7 +620,7 @@ int DropGold(int pnum, int amount, bool skipFullStacks)
 	for (int i = 0; i < player._pNumInv && amount > 0; i++) {
 		auto &item = player.InvList[i];
 
-		if (item._itype != ITYPE_GOLD || (skipFullStacks && item._ivalue == MaxGold))
+		if (item._itype != ItemType::Gold || (skipFullStacks && item._ivalue == MaxGold))
 			continue;
 
 		if (amount < item._ivalue) {
@@ -743,7 +744,7 @@ bool DoWalk(int pnum, int variant)
 		}
 
 		//Update the "camera" tile position
-		if (pnum == MyPlayerId && ScrollInfo._sdir != SDIR_NONE) {
+		if (pnum == MyPlayerId && ScrollInfo._sdir != ScrollDirection::None) {
 			ViewPosition = Point { 0, 0 } + (player.position.tile - ScrollInfo.tile);
 		}
 
@@ -773,7 +774,7 @@ bool WeaponDecay(Player &player, int ii)
 		player.InvBody[ii]._iPLDam -= 5;
 		if (player.InvBody[ii]._iPLDam <= -100) {
 			NetSendCmdDelItem(true, ii);
-			player.InvBody[ii]._itype = ITYPE_NONE;
+			player.InvBody[ii]._itype = ItemType::None;
 			CalcPlrInv(player, true);
 			return true;
 		}
@@ -810,7 +811,7 @@ bool DamageWeapon(int pnum, int durrnd)
 		player.InvBody[INVLOC_HAND_LEFT]._iDurability--;
 		if (player.InvBody[INVLOC_HAND_LEFT]._iDurability <= 0) {
 			NetSendCmdDelItem(true, INVLOC_HAND_LEFT);
-			player.InvBody[INVLOC_HAND_LEFT]._itype = ITYPE_NONE;
+			player.InvBody[INVLOC_HAND_LEFT]._itype = ItemType::None;
 			CalcPlrInv(player, true);
 			return true;
 		}
@@ -824,13 +825,13 @@ bool DamageWeapon(int pnum, int durrnd)
 		player.InvBody[INVLOC_HAND_RIGHT]._iDurability--;
 		if (player.InvBody[INVLOC_HAND_RIGHT]._iDurability == 0) {
 			NetSendCmdDelItem(true, INVLOC_HAND_RIGHT);
-			player.InvBody[INVLOC_HAND_RIGHT]._itype = ITYPE_NONE;
+			player.InvBody[INVLOC_HAND_RIGHT]._itype = ItemType::None;
 			CalcPlrInv(player, true);
 			return true;
 		}
 	}
 
-	if (player.InvBody[INVLOC_HAND_LEFT].isEmpty() && player.InvBody[INVLOC_HAND_RIGHT]._itype == ITYPE_SHIELD) {
+	if (player.InvBody[INVLOC_HAND_LEFT].isEmpty() && player.InvBody[INVLOC_HAND_RIGHT]._itype == ItemType::Shield) {
 		if (player.InvBody[INVLOC_HAND_RIGHT]._iDurability == DUR_INDESTRUCTIBLE) {
 			return false;
 		}
@@ -838,13 +839,13 @@ bool DamageWeapon(int pnum, int durrnd)
 		player.InvBody[INVLOC_HAND_RIGHT]._iDurability--;
 		if (player.InvBody[INVLOC_HAND_RIGHT]._iDurability == 0) {
 			NetSendCmdDelItem(true, INVLOC_HAND_RIGHT);
-			player.InvBody[INVLOC_HAND_RIGHT]._itype = ITYPE_NONE;
+			player.InvBody[INVLOC_HAND_RIGHT]._itype = ItemType::None;
 			CalcPlrInv(player, true);
 			return true;
 		}
 	}
 
-	if (player.InvBody[INVLOC_HAND_RIGHT].isEmpty() && player.InvBody[INVLOC_HAND_LEFT]._itype == ITYPE_SHIELD) {
+	if (player.InvBody[INVLOC_HAND_RIGHT].isEmpty() && player.InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Shield) {
 		if (player.InvBody[INVLOC_HAND_LEFT]._iDurability == DUR_INDESTRUCTIBLE) {
 			return false;
 		}
@@ -852,7 +853,7 @@ bool DamageWeapon(int pnum, int durrnd)
 		player.InvBody[INVLOC_HAND_LEFT]._iDurability--;
 		if (player.InvBody[INVLOC_HAND_LEFT]._iDurability == 0) {
 			NetSendCmdDelItem(true, INVLOC_HAND_LEFT);
-			player.InvBody[INVLOC_HAND_LEFT]._itype = ITYPE_NONE;
+			player.InvBody[INVLOC_HAND_LEFT]._itype = ItemType::None;
 			CalcPlrInv(player, true);
 			return true;
 		}
@@ -934,26 +935,26 @@ bool PlrHitMonst(int pnum, int m)
 		}
 	}
 
-	int phanditype = ITYPE_NONE;
-	if (player.InvBody[INVLOC_HAND_LEFT]._itype == ITYPE_SWORD || player.InvBody[INVLOC_HAND_RIGHT]._itype == ITYPE_SWORD) {
-		phanditype = ITYPE_SWORD;
+	ItemType phanditype = ItemType::None;
+	if (player.InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Sword || player.InvBody[INVLOC_HAND_RIGHT]._itype == ItemType::Sword) {
+		phanditype = ItemType::Sword;
 	}
-	if (player.InvBody[INVLOC_HAND_LEFT]._itype == ITYPE_MACE || player.InvBody[INVLOC_HAND_RIGHT]._itype == ITYPE_MACE) {
-		phanditype = ITYPE_MACE;
+	if (player.InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Mace || player.InvBody[INVLOC_HAND_RIGHT]._itype == ItemType::Mace) {
+		phanditype = ItemType::Mace;
 	}
 
 	switch (monster.MData->mMonstClass) {
 	case MonsterClass::Undead:
-		if (phanditype == ITYPE_SWORD) {
+		if (phanditype == ItemType::Sword) {
 			dam -= dam / 2;
-		} else if (phanditype == ITYPE_MACE) {
+		} else if (phanditype == ItemType::Mace) {
 			dam += dam / 2;
 		}
 		break;
 	case MonsterClass::Animal:
-		if (phanditype == ITYPE_MACE) {
+		if (phanditype == ItemType::Mace) {
 			dam -= dam / 2;
-		} else if (phanditype == ITYPE_SWORD) {
+		} else if (phanditype == ItemType::Sword) {
 			dam += dam / 2;
 		}
 		break;
@@ -1197,9 +1198,9 @@ bool DoAttack(int pnum)
 
 		if ((player._pIFlags & ISPL_FIREDAM) == 0 || (player._pIFlags & ISPL_LIGHTDAM) == 0) {
 			if ((player._pIFlags & ISPL_FIREDAM) != 0) {
-				AddMissile({ dx, dy }, { 1, 0 }, DIR_S, MIS_WEAPEXP, TARGET_MONSTERS, pnum, 0, 0);
+				AddMissile({ dx, dy }, { 1, 0 }, Direction::South, MIS_WEAPEXP, TARGET_MONSTERS, pnum, 0, 0);
 			} else if ((player._pIFlags & ISPL_LIGHTDAM) != 0) {
-				AddMissile({ dx, dy }, { 2, 0 }, DIR_S, MIS_WEAPEXP, TARGET_MONSTERS, pnum, 0, 0);
+				AddMissile({ dx, dy }, { 2, 0 }, Direction::South, MIS_WEAPEXP, TARGET_MONSTERS, pnum, 0, 0);
 			}
 		}
 
@@ -1223,17 +1224,17 @@ bool DoAttack(int pnum)
 			didhit = PlrHitObj(pnum, dx, dy);
 		}
 		if ((player._pClass == HeroClass::Monk
-		        && (player.InvBody[INVLOC_HAND_LEFT]._itype == ITYPE_STAFF || player.InvBody[INVLOC_HAND_RIGHT]._itype == ITYPE_STAFF))
+		        && (player.InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Staff || player.InvBody[INVLOC_HAND_RIGHT]._itype == ItemType::Staff))
 		    || (player._pClass == HeroClass::Bard
-		        && player.InvBody[INVLOC_HAND_LEFT]._itype == ITYPE_SWORD && player.InvBody[INVLOC_HAND_RIGHT]._itype == ITYPE_SWORD)
+		        && player.InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Sword && player.InvBody[INVLOC_HAND_RIGHT]._itype == ItemType::Sword)
 		    || (player._pClass == HeroClass::Barbarian
-		        && (player.InvBody[INVLOC_HAND_LEFT]._itype == ITYPE_AXE || player.InvBody[INVLOC_HAND_RIGHT]._itype == ITYPE_AXE
-		            || (((player.InvBody[INVLOC_HAND_LEFT]._itype == ITYPE_MACE && player.InvBody[INVLOC_HAND_LEFT]._iLoc == ILOC_TWOHAND)
-		                    || (player.InvBody[INVLOC_HAND_RIGHT]._itype == ITYPE_MACE && player.InvBody[INVLOC_HAND_RIGHT]._iLoc == ILOC_TWOHAND)
-		                    || (player.InvBody[INVLOC_HAND_LEFT]._itype == ITYPE_SWORD && player.InvBody[INVLOC_HAND_LEFT]._iLoc == ILOC_TWOHAND)
-		                    || (player.InvBody[INVLOC_HAND_RIGHT]._itype == ITYPE_SWORD && player.InvBody[INVLOC_HAND_RIGHT]._iLoc == ILOC_TWOHAND))
-		                && !(player.InvBody[INVLOC_HAND_LEFT]._itype == ITYPE_SHIELD || player.InvBody[INVLOC_HAND_RIGHT]._itype == ITYPE_SHIELD))))) {
-			position = player.position.tile + right[player._pdir];
+		        && (player.InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Axe || player.InvBody[INVLOC_HAND_RIGHT]._itype == ItemType::Axe
+		            || (((player.InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Mace && player.InvBody[INVLOC_HAND_LEFT]._iLoc == ILOC_TWOHAND)
+		                    || (player.InvBody[INVLOC_HAND_RIGHT]._itype == ItemType::Mace && player.InvBody[INVLOC_HAND_RIGHT]._iLoc == ILOC_TWOHAND)
+		                    || (player.InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Sword && player.InvBody[INVLOC_HAND_LEFT]._iLoc == ILOC_TWOHAND)
+		                    || (player.InvBody[INVLOC_HAND_RIGHT]._itype == ItemType::Sword && player.InvBody[INVLOC_HAND_RIGHT]._iLoc == ILOC_TWOHAND))
+		                && !(player.InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Shield || player.InvBody[INVLOC_HAND_RIGHT]._itype == ItemType::Shield))))) {
+			position = player.position.tile + Right(player._pdir);
 			if (dMonster[position.x][position.y] != 0) {
 				int m = abs(dMonster[position.x][position.y]) - 1;
 				auto &monster = Monsters[m];
@@ -1242,7 +1243,7 @@ bool DoAttack(int pnum)
 						didhit = true;
 				}
 			}
-			position = player.position.tile + left[player._pdir];
+			position = player.position.tile + Left(player._pdir);
 			if (dMonster[position.x][position.y] != 0) {
 				int m = abs(dMonster[position.x][position.y]) - 1;
 				auto &monster = Monsters[m];
@@ -1350,7 +1351,7 @@ void ShieldDur(int pnum)
 	}
 	auto &player = Players[pnum];
 
-	if (player.InvBody[INVLOC_HAND_LEFT]._itype == ITYPE_SHIELD) {
+	if (player.InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Shield) {
 		if (player.InvBody[INVLOC_HAND_LEFT]._iDurability == DUR_INDESTRUCTIBLE) {
 			return;
 		}
@@ -1358,17 +1359,17 @@ void ShieldDur(int pnum)
 		player.InvBody[INVLOC_HAND_LEFT]._iDurability--;
 		if (player.InvBody[INVLOC_HAND_LEFT]._iDurability == 0) {
 			NetSendCmdDelItem(true, INVLOC_HAND_LEFT);
-			player.InvBody[INVLOC_HAND_LEFT]._itype = ITYPE_NONE;
+			player.InvBody[INVLOC_HAND_LEFT]._itype = ItemType::None;
 			CalcPlrInv(player, true);
 		}
 	}
 
-	if (player.InvBody[INVLOC_HAND_RIGHT]._itype == ITYPE_SHIELD) {
+	if (player.InvBody[INVLOC_HAND_RIGHT]._itype == ItemType::Shield) {
 		if (player.InvBody[INVLOC_HAND_RIGHT]._iDurability != DUR_INDESTRUCTIBLE) {
 			player.InvBody[INVLOC_HAND_RIGHT]._iDurability--;
 			if (player.InvBody[INVLOC_HAND_RIGHT]._iDurability == 0) {
 				NetSendCmdDelItem(true, INVLOC_HAND_RIGHT);
-				player.InvBody[INVLOC_HAND_RIGHT]._itype = ITYPE_NONE;
+				player.InvBody[INVLOC_HAND_RIGHT]._itype = ItemType::None;
 				CalcPlrInv(player, true);
 			}
 		}
@@ -1440,7 +1441,7 @@ void DamageArmor(int pnum)
 	} else {
 		NetSendCmdDelItem(true, INVLOC_HEAD);
 	}
-	pi->_itype = ITYPE_NONE;
+	pi->_itype = ItemType::None;
 	CalcPlrInv(player, true);
 }
 
@@ -1617,28 +1618,28 @@ void CheckNewPath(int pnum, bool pmWillBeCalled)
 
 			switch (player.walkpath[0]) {
 			case WALK_N:
-				StartWalk(pnum, { 0, -xvel }, DIR_N, pmWillBeCalled);
+				StartWalk(pnum, { 0, -xvel }, Direction::North, pmWillBeCalled);
 				break;
 			case WALK_NE:
-				StartWalk(pnum, { xvel, -yvel }, DIR_NE, pmWillBeCalled);
+				StartWalk(pnum, { xvel, -yvel }, Direction::NorthEast, pmWillBeCalled);
 				break;
 			case WALK_E:
-				StartWalk(pnum, { xvel3, 0 }, DIR_E, pmWillBeCalled);
+				StartWalk(pnum, { xvel3, 0 }, Direction::East, pmWillBeCalled);
 				break;
 			case WALK_SE:
-				StartWalk(pnum, { xvel, yvel }, DIR_SE, pmWillBeCalled);
+				StartWalk(pnum, { xvel, yvel }, Direction::SouthEast, pmWillBeCalled);
 				break;
 			case WALK_S:
-				StartWalk(pnum, { 0, xvel }, DIR_S, pmWillBeCalled);
+				StartWalk(pnum, { 0, xvel }, Direction::South, pmWillBeCalled);
 				break;
 			case WALK_SW:
-				StartWalk(pnum, { -xvel, yvel }, DIR_SW, pmWillBeCalled);
+				StartWalk(pnum, { -xvel, yvel }, Direction::SouthWest, pmWillBeCalled);
 				break;
 			case WALK_W:
-				StartWalk(pnum, { -xvel3, 0 }, DIR_W, pmWillBeCalled);
+				StartWalk(pnum, { -xvel3, 0 }, Direction::West, pmWillBeCalled);
 				break;
 			case WALK_NW:
-				StartWalk(pnum, { -xvel, -yvel }, DIR_NW, pmWillBeCalled);
+				StartWalk(pnum, { -xvel, -yvel }, Direction::NorthWest, pmWillBeCalled);
 				break;
 			}
 
@@ -1705,7 +1706,7 @@ void CheckNewPath(int pnum, bool pmWillBeCalled)
 		case ACTION_SPELL:
 			d = GetDirection(player.position.tile, { player.destParam1, player.destParam2 });
 			StartSpell(pnum, d, player.destParam1, player.destParam2);
-			player._pVar4 = player.destParam3;
+			player._pVar4 = static_cast<int>(player.destParam3);
 			break;
 		case ACTION_SPELLWALL:
 			StartSpell(pnum, player.destParam3, player.destParam1, player.destParam2);
@@ -1904,7 +1905,7 @@ void ValidatePlayer()
 
 	int gt = 0;
 	for (int i = 0; i < myPlayer._pNumInv; i++) {
-		if (myPlayer.InvList[i]._itype == ITYPE_GOLD) {
+		if (myPlayer.InvList[i]._itype == ItemType::Gold) {
 			int maxGold = GOLD_MAX_LIMIT;
 			if (gbIsHellfire) {
 				maxGold *= 2;
@@ -2048,7 +2049,7 @@ bool Player::TryRemoveInvItemById(int item)
 
 void Player::RemoveSpdBarItem(int iv)
 {
-	SpdList[iv]._itype = ITYPE_NONE;
+	SpdList[iv]._itype = ItemType::None;
 
 	CalcScrolls();
 	force_redraw = 255;
@@ -2293,11 +2294,9 @@ void NewPlrAnim(Player &player, player_graphic graphic, Direction dir, int numbe
 	if (player.AnimationData[static_cast<size_t>(graphic)].RawData == nullptr)
 		LoadPlrGFX(player, graphic);
 
-	auto &celSprites = player.AnimationData[static_cast<size_t>(graphic)].CelSpritesForDirections;
+	auto &celSprite = player.AnimationData[static_cast<size_t>(graphic)].CelSpritesForDirections[static_cast<size_t>(dir)];
 
-	CelSprite *pCelSprite = nullptr;
-	if (celSprites[dir])
-		pCelSprite = &*celSprites[dir];
+	CelSprite *pCelSprite = celSprite ? &*celSprite : nullptr;
 
 	player.AnimInfo.SetNewAnimation(pCelSprite, numberOfFrames, delayLen, flags, numSkippedFrames, distributeFramesBeforeFrame);
 }
@@ -2738,16 +2737,16 @@ void InitPlayer(Player &player, bool firstTime)
 
 		if (player._pHitPoints >> 6 > 0) {
 			player._pmode = PM_STAND;
-			NewPlrAnim(player, player_graphic::Stand, DIR_S, player._pNFrames, 4);
+			NewPlrAnim(player, player_graphic::Stand, Direction::South, player._pNFrames, 4);
 			player.AnimInfo.CurrentFrame = GenerateRnd(player._pNFrames - 1) + 1;
 			player.AnimInfo.TickCounterOfCurrentFrame = GenerateRnd(3);
 		} else {
 			player._pmode = PM_DEATH;
-			NewPlrAnim(player, player_graphic::Death, DIR_S, player._pDFrames, 2);
+			NewPlrAnim(player, player_graphic::Death, Direction::South, player._pDFrames, 2);
 			player.AnimInfo.CurrentFrame = player.AnimInfo.NumberOfFrames - 1;
 		}
 
-		player._pdir = DIR_S;
+		player._pdir = Direction::South;
 
 		if (&player == &myPlayer) {
 			if (!firstTime || currlevel != 0) {
@@ -2801,7 +2800,7 @@ void InitPlayer(Player &player, bool firstTime)
 		deathdelay = 0;
 		MyPlayerIsDead = false;
 		ScrollInfo.offset = { 0, 0 };
-		ScrollInfo._sdir = SDIR_NONE;
+		ScrollInfo._sdir = ScrollDirection::None;
 	}
 }
 
@@ -2857,7 +2856,7 @@ void FixPlayerLocation(int pnum, Direction bDir)
 	player._pdir = bDir;
 	if (pnum == MyPlayerId) {
 		ScrollInfo.offset = { 0, 0 };
-		ScrollInfo._sdir = SDIR_NONE;
+		ScrollInfo._sdir = ScrollDirection::None;
 		ViewPosition = player.position.tile;
 	}
 	ChangeLightXY(player._plid, player.position.tile);
@@ -3044,7 +3043,7 @@ StartPlayerKill(int pnum, int earflag)
 
 	if (pnum != MyPlayerId && earflag == 0 && !diablolevel) {
 		for (auto &item : player.InvBody) {
-			item._itype = ITYPE_NONE;
+			item._itype = ItemType::None;
 		}
 		CalcPlrInv(player, false);
 	}
@@ -3096,7 +3095,7 @@ StartPlayerKill(int pnum, int earflag)
 					} else {
 						Direction pdd = player._pdir;
 						for (auto &item : player.InvBody) {
-							pdd = left[pdd];
+							pdd = Left(pdd);
 							DeadItem(player, &item, Displacement(pdd));
 						}
 
@@ -3114,7 +3113,7 @@ void StripTopGold(Player &player)
 	Item tmpItem = player.HoldItem;
 
 	for (int i = 0; i < player._pNumInv; i++) {
-		if (player.InvList[i]._itype == ITYPE_GOLD) {
+		if (player.InvList[i]._itype == ItemType::Gold) {
 			if (player.InvList[i]._ivalue > MaxGold) {
 				int val = player.InvList[i]._ivalue - MaxGold;
 				player.InvList[i]._ivalue = MaxGold;
@@ -3137,7 +3136,7 @@ void ApplyPlrDamage(int pnum, int dam, int minHP /*= 0*/, int frac /*= 0*/, int 
 
 	int totalDamage = (dam << 6) + frac;
 	if (totalDamage > 0 && player.pManaShield) {
-		int manaShieldLevel = player._pSplLvl[SPL_MANASHIELD];
+		int8_t manaShieldLevel = player._pSplLvl[SPL_MANASHIELD];
 		if (manaShieldLevel > 0) {
 			totalDamage += totalDamage / -3;
 		}
@@ -3550,19 +3549,19 @@ void CheckPlrSpell()
 		LastMouseButtonAction = MouseActionType::Spell;
 		Direction sd = GetDirection(myPlayer.position.tile, cursPosition);
 		sl = GetSpellLevel(MyPlayerId, myPlayer._pRSpell);
-		NetSendCmdLocParam3(true, CMD_SPELLXYD, cursPosition, myPlayer._pRSpell, sd, sl);
+		NetSendCmdLocParam4(true, CMD_SPELLXYD, cursPosition, myPlayer._pRSpell, myPlayer._pRSplType, static_cast<uint16_t>(sd), sl);
 	} else if (pcursmonst != -1) {
 		LastMouseButtonAction = MouseActionType::SpellMonsterTarget;
 		sl = GetSpellLevel(MyPlayerId, myPlayer._pRSpell);
-		NetSendCmdParam3(true, CMD_SPELLID, pcursmonst, myPlayer._pRSpell, sl);
+		NetSendCmdParam4(true, CMD_SPELLID, pcursmonst, myPlayer._pRSpell, myPlayer._pRSplType, sl);
 	} else if (pcursplr != -1) {
 		LastMouseButtonAction = MouseActionType::SpellPlayerTarget;
 		sl = GetSpellLevel(MyPlayerId, myPlayer._pRSpell);
-		NetSendCmdParam3(true, CMD_SPELLPID, pcursplr, myPlayer._pRSpell, sl);
+		NetSendCmdParam4(true, CMD_SPELLPID, pcursplr, myPlayer._pRSpell, myPlayer._pRSplType, sl);
 	} else {
 		LastMouseButtonAction = MouseActionType::Spell;
 		sl = GetSpellLevel(MyPlayerId, myPlayer._pRSpell);
-		NetSendCmdLocParam2(true, CMD_SPELLXY, cursPosition, myPlayer._pRSpell, sl);
+		NetSendCmdLocParam3(true, CMD_SPELLXY, cursPosition, myPlayer._pRSpell, myPlayer._pRSplType, sl);
 	}
 }
 
@@ -3618,7 +3617,7 @@ void SyncPlrAnim(int pnum)
 		app_fatal("SyncPlrAnim");
 	}
 
-	player.AnimInfo.pCelSprite = &*player.AnimationData[static_cast<size_t>(graphic)].CelSpritesForDirections[player._pdir];
+	player.AnimInfo.pCelSprite = &*player.AnimationData[static_cast<size_t>(graphic)].CelSpritesForDirections[static_cast<size_t>(player._pdir)];
 }
 
 void SyncInitPlrPos(int pnum)

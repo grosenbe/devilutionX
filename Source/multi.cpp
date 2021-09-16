@@ -427,6 +427,7 @@ bool InitSingle(GameData *gameData)
 	}
 
 	MyPlayerId = 0;
+	MyPlayer = &Players[MyPlayerId];
 	gbIsMultiplayer = false;
 
 	return true;
@@ -452,9 +453,10 @@ bool InitMulti(GameData *gameData)
 		return false;
 	}
 	MyPlayerId = playerId;
+	MyPlayer = &Players[MyPlayerId];
 	gbIsMultiplayer = true;
 
-	pfile_read_player_from_save(gSaveNumber, Players[MyPlayerId]);
+	pfile_read_player_from_save(gSaveNumber, *MyPlayer);
 
 	return true;
 }
@@ -538,9 +540,6 @@ void multi_net_ping()
 	sglTimeoutStart = SDL_GetTicks();
 }
 
-/**
- * @return Always true for singleplayer
- */
 bool multi_handle_delta()
 {
 	if (gbGameDestroyed) {
@@ -827,13 +826,13 @@ void recv_plrinfo(int pnum, TCmdPlrInfoHdr *p, bool recv)
 	}
 
 	if (player._pHitPoints >> 6 > 0) {
-		StartStand(pnum, DIR_S);
+		StartStand(pnum, Direction::South);
 		return;
 	}
 
 	player._pgfxnum = 0;
 	player._pmode = PM_DEATH;
-	NewPlrAnim(player, player_graphic::Death, DIR_S, player._pDFrames, 1);
+	NewPlrAnim(player, player_graphic::Death, Direction::South, player._pDFrames, 1);
 	player.AnimInfo.CurrentFrame = player.AnimInfo.NumberOfFrames - 1;
 	dFlags[player.position.tile.x][player.position.tile.y] |= BFLAG_DEAD_PLAYER;
 }
