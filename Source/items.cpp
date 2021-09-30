@@ -24,6 +24,7 @@
 #include "engine/render/cel_render.hpp"
 #include "engine/render/text_render.hpp"
 #include "init.h"
+#include "inv_iterators.hpp"
 #include "lighting.h"
 #include "missiles.h"
 #include "options.h"
@@ -522,15 +523,8 @@ bool ItemMinStats(const Player &player, Item &x)
 
 void CalcPlrItemMin(Player &player)
 {
-	for (int i = 0; i < player._pNumInv; i++) {
-		auto &item = player.InvList[i];
+	for (Item &item : InventoryAndBeltPlayerItemsRange { player }) {
 		item._iStatFlag = ItemMinStats(player, item);
-	}
-
-	for (auto &item : player.SpdList) {
-		if (!item.isEmpty()) {
-			item._iStatFlag = ItemMinStats(player, item);
-		}
 	}
 }
 
@@ -713,8 +707,8 @@ void GetBookSpell(Item &item, int lvl)
 		if (s == maxSpells)
 			s = 1;
 	}
-	strcat(item._iName, _(spelldata[bs].sNameText));
-	strcat(item._iIName, _(spelldata[bs].sNameText));
+	strcat(item._iName, pgettext("spell", spelldata[bs].sNameText));
+	strcat(item._iIName, pgettext("spell", spelldata[bs].sNameText));
 	item._iSpell = bs;
 	item._iMinMag = spelldata[bs].sMinInt;
 	item._ivalue += spelldata[bs].sBookCost;
@@ -1191,7 +1185,7 @@ void GetStaffPower(Item &item, int lvl, int bs, bool onlygood)
 			sprintf(istr, "%s %s", _(ItemPrefixes[preidx].PLName), item._iIName);
 			strcpy(item._iIName, istr);
 		}
-		strcpy(istr, fmt::format(_(/* TRANSLATORS: Constructs item names. Format: <Prefix> <Item> of <Suffix>. Example: King's Long Sword of the Whale */ "{:s} of {:s}"), item._iIName, _(spelldata[bs].sNameText)).c_str());
+		strcpy(istr, fmt::format(_(/* TRANSLATORS: Constructs item names. Format: <Prefix> <Item> of <Suffix>. Example: King's Long Sword of the Whale */ "{:s} of {:s}"), item._iIName, pgettext("spell", spelldata[bs].sNameText)).c_str());
 		strcpy(item._iIName, istr);
 		if (item._iMagical == ITEM_QUALITY_NORMAL)
 			strcpy(item._iName, item._iIName);
@@ -1321,8 +1315,8 @@ void GetStaffSpell(Item &item, int lvl, bool onlygood)
 
 	char istr[68];
 	if (!StringInPanel(istr))
-		strcpy(istr, fmt::format(_("{:s} of {:s}"), item._iName, _(spelldata[bs].sNameText)).c_str());
-	strcpy(istr, fmt::format(_("Staff of {:s}"), _(spelldata[bs].sNameText)).c_str());
+		strcpy(istr, fmt::format(_("{:s} of {:s}"), item._iName, pgettext("spell", spelldata[bs].sNameText)).c_str());
+	strcpy(istr, fmt::format(_("Staff of {:s}"), pgettext("spell", spelldata[bs].sNameText)).c_str());
 	strcpy(item._iName, istr);
 	strcpy(item._iIName, istr);
 
@@ -1564,8 +1558,6 @@ void ItemRndDur(Item &item)
 
 void SetupAllItems(Item &item, int idx, int iseed, int lvl, int uper, bool onlygood, bool recreate, bool pregen)
 {
-	int iblvl;
-
 	item._iSeed = iseed;
 	SetRndSeed(iseed);
 	GetItemAttrs(item, idx, lvl / 2);
@@ -1582,7 +1574,7 @@ void SetupAllItems(Item &item, int idx, int iseed, int lvl, int uper, bool onlyg
 		item._iCreateInfo |= CF_UPER1;
 
 	if (item._iMiscId != IMISC_UNIQUE) {
-		iblvl = -1;
+		int iblvl = -1;
 		if (GenerateRnd(100) <= 10 || GenerateRnd(100) <= lvl) {
 			iblvl = lvl;
 		}
@@ -2041,15 +2033,6 @@ void DrawUniqueInfoWindow(const Surface &out)
 {
 	CelDrawTo(out, GetPanelPosition(UiPanels::Inventory, { 24 - SPANEL_WIDTH, 327 }), *pSTextBoxCels, 1);
 	DrawHalfTransparentRectTo(out, RightPanel.position.x - SPANEL_WIDTH + 27, RightPanel.position.y + 28, 265, 297);
-}
-
-void DrawUniqueInfoDevider(const Surface &out, int y)
-{
-	BYTE *src = out.at(26 + RightPanel.position.x - SPANEL_WIDTH, RightPanel.position.y + 25);
-	BYTE *dst = out.at(26 + RightPanel.position.x - SPANEL_WIDTH, RightPanel.position.y + y * 12 + 38);
-
-	for (int i = 0; i < 3; i++, src += out.pitch(), dst += out.pitch())
-		memcpy(dst, src, 267); // BUGFIX: should be 267 (fixed)
 }
 
 void PrintItemMisc(Item &item)
@@ -2525,6 +2508,9 @@ void NextItemRecord(int i)
 
 bool IsItemAvailable(int i)
 {
+	if (i < 0 || i > IDI_LAST)
+		return false;
+
 	if (gbIsSpawn) {
 		if (i >= 62 && i <= 71)
 			return false; // Medium and heavy armors
@@ -3894,7 +3880,7 @@ void PrintItemPower(char plidx, Item *x)
 		strcpy(tempstr, _("Extra charges"));
 		break;
 	case IPL_SPELL:
-		strcpy(tempstr, fmt::format(ngettext("{:d} {:s} charge", "{:d} {:s} charges", x->_iMaxCharges), x->_iMaxCharges, _(spelldata[x->_iSpell].sNameText)).c_str());
+		strcpy(tempstr, fmt::format(ngettext("{:d} {:s} charge", "{:d} {:s} charges", x->_iMaxCharges), x->_iMaxCharges, pgettext("spell", spelldata[x->_iSpell].sNameText)).c_str());
 		break;
 	case IPL_FIREDAM:
 		if (x->_iFMinDam == x->_iFMaxDam)
@@ -4122,17 +4108,19 @@ void PrintItemPower(char plidx, Item *x)
 
 void DrawUniqueInfo(const Surface &out)
 {
-	if ((chrflag || QuestLogIsOpen) && LeftPanel.Contains({ RightPanel.position.x - SPANEL_WIDTH, RightPanel.position.y })) {
+	const Point position { RightPanel.position.x - SPANEL_WIDTH, RightPanel.position.y };
+	if ((chrflag || QuestLogIsOpen) && LeftPanel.Contains(position)) {
 		return;
 	}
 
-	DrawUniqueInfoWindow(GlobalBackBuffer());
+	DrawUniqueInfoWindow(out);
 
-	Rectangle rect { { 32 + RightPanel.position.x - SPANEL_WIDTH, 44 + RightPanel.position.y + 12 }, { 257, 0 } };
+	Rectangle rect { position + Displacement { 32, 56 }, { 257, 0 } };
 	const UniqueItem &uitem = UniqueItems[curruitem._iUid];
 	DrawString(out, _(uitem.UIName), rect, UiFlags::AlignCenter);
 
-	DrawUniqueInfoDevider(out, 5);
+	const Rectangle dividerLineRect { position + Displacement { 26, 25 }, { 267, 3 } };
+	out.BlitFrom(out, MakeSdlRect(dividerLineRect), dividerLineRect.position + Displacement { 0, 5 * 12 + 13 });
 
 	rect.position.y += (10 - uitem.UINumPL) * 12;
 	assert(uitem.UINumPL <= sizeof(uitem.powers) / sizeof(*uitem.powers));
@@ -4141,7 +4129,7 @@ void DrawUniqueInfo(const Surface &out)
 			break;
 		rect.position.y += 2 * 12;
 		PrintItemPower(power.type, &curruitem);
-		DrawString(out, tempstr, rect, UiFlags::ColorSilver | UiFlags::AlignCenter);
+		DrawString(out, tempstr, rect, UiFlags::ColorWhite | UiFlags::AlignCenter);
 	}
 }
 
@@ -4649,6 +4637,8 @@ void SpawnBoy(int lvl)
 			ivalue = mostValuablePlayerItem == nullptr ? 0 : mostValuablePlayerItem->_iIvalue;
 			break;
 		}
+		default:
+			app_fatal("Invalid item spawn");
 		}
 		ivalue = ivalue * 4 / 5; // avoids forced int > float > int conversion
 
@@ -4864,7 +4854,7 @@ void PutItemRecord(int nSeed, uint16_t wCI, int nIndex)
 
 #ifdef _DEBUG
 std::mt19937 BetterRng;
-std::string DebugSpawnItem(std::string itemName, bool unique)
+std::string DebugSpawnItem(std::string itemName)
 {
 	if (ActiveItemCount >= MAXITEMS)
 		return "No space to generate the item!";
@@ -4872,16 +4862,18 @@ std::string DebugSpawnItem(std::string itemName, bool unique)
 	const int max_time = 3000;
 	const int max_iter = 1000000;
 
+	std::transform(itemName.begin(), itemName.end(), itemName.begin(), [](unsigned char c) { return std::tolower(c); });
+
 	int ii = AllocateItem();
 	auto &item = Items[ii];
 	Point pos = Players[MyPlayerId].position.tile;
 	GetSuperItemSpace(pos, ii);
-	std::transform(itemName.begin(), itemName.end(), itemName.begin(), [](unsigned char c) { return std::tolower(c); });
 
 	uint32_t begin = SDL_GetTicks();
 	Monster fake_m;
 	fake_m.MData = &MonstersData[0];
 	fake_m._uniqtype = 0;
+
 	int i = 0;
 	for (;; i++) {
 		// using a better rng here to seed the item to prevent getting stuck repeating same values using old one
@@ -4894,8 +4886,9 @@ std::string DebugSpawnItem(std::string itemName, bool unique)
 			return fmt::format("Item not found in {:d} tries!", max_iter);
 
 		fake_m.mLevel = dist(BetterRng) % CF_LEVEL + 1;
+
 		int idx = RndItem(fake_m);
-		if (idx > 0) {
+		if (idx > 1) {
 			idx--;
 		} else
 			continue;
@@ -4903,17 +4896,89 @@ std::string DebugSpawnItem(std::string itemName, bool unique)
 		Point bkp = item.position;
 		memset(&item, 0, sizeof(Item));
 		item.position = bkp;
-		memset(UniqueItemFlags, 0, sizeof(UniqueItemFlags));
-		SetupAllItems(item, idx, AdvanceRndSeed(), fake_m.mLevel, (unique ? 15 : 1), false, false, false);
+		SetupAllItems(item, idx, AdvanceRndSeed(), fake_m.mLevel, 1, false, false, false);
 
 		std::string tmp(item._iIName);
 		std::transform(tmp.begin(), tmp.end(), tmp.begin(), [](unsigned char c) { return std::tolower(c); });
 		if (tmp.find(itemName) != std::string::npos)
 			break;
+	}
 
-		if (unique)
-			if (item._iMagical != ITEM_QUALITY_UNIQUE)
-				continue;
+	item._iIdentified = true;
+	NetSendCmdDItem(false, ii);
+	return fmt::format("Item generated successfully - iterations: {:d}", i);
+}
+
+std::string DebugSpawnUniqueItem(std::string itemName)
+{
+	if (ActiveItemCount >= MAXITEMS)
+		return "No space to generate the item!";
+
+	const int max_time = 3000;
+	const int max_iter = 1000000;
+
+	std::transform(itemName.begin(), itemName.end(), itemName.begin(), [](unsigned char c) { return std::tolower(c); });
+	UniqueItem uniqueItem;
+	bool foundUnique = false;
+	int uniqueBaseIndex = 0;
+	int uniqueIndex = 0;
+	for (int j = 0; UniqueItems[j].UIItemId != UITYPE_INVALID; j++) {
+		if (!IsUniqueAvailable(j))
+			break;
+
+		std::string tmp(UniqueItems[j].UIName);
+		std::transform(tmp.begin(), tmp.end(), tmp.begin(), [](unsigned char c) { return std::tolower(c); });
+		if (tmp.find(itemName) != std::string::npos) {
+			itemName = tmp;
+			uniqueItem = UniqueItems[j];
+			uniqueIndex = j;
+			foundUnique = true;
+			break;
+		}
+	}
+	if (!foundUnique)
+		return "No unique found!";
+
+	for (int j = 0; AllItemsList[j].iLoc != ILOC_INVALID; j++) {
+		if (!IsItemAvailable(j))
+			continue;
+		if (AllItemsList[j].iItemId == uniqueItem.UIItemId)
+			uniqueBaseIndex = j;
+	}
+
+	int ii = AllocateItem();
+	auto &item = Items[ii];
+	Point pos = Players[MyPlayerId].position.tile;
+	GetSuperItemSpace(pos, ii);
+
+	int i = 0;
+	for (uint32_t begin = SDL_GetTicks();; i++) {
+		if (SDL_GetTicks() - begin > max_time)
+			return fmt::format("Item not found in {:d} seconds!", max_time / 1000);
+
+		if (i > max_iter)
+			return fmt::format("Item not found in {:d} tries!", max_iter);
+
+		Point bkp = item.position;
+		memset(&item, 0, sizeof(Item));
+		item.position = bkp;
+		std::uniform_int_distribution<int32_t> dist(0, INT_MAX);
+		SetRndSeed(dist(BetterRng));
+		for (auto &flag : UniqueItemFlags)
+			flag = true;
+		UniqueItemFlags[uniqueIndex] = false;
+		SetupAllItems(item, uniqueBaseIndex, AdvanceRndSeed(), uniqueItem.UIMinLvl, 1, false, false, false);
+		for (auto &flag : UniqueItemFlags)
+			flag = false;
+
+		if (item._iMagical != ITEM_QUALITY_UNIQUE)
+			continue;
+
+		std::string tmp(item._iIName);
+		std::transform(tmp.begin(), tmp.end(), tmp.begin(), [](unsigned char c) { return std::tolower(c); });
+		if (tmp.find(itemName) != std::string::npos)
+			break;
+		return "Impossible to generate!";
 	}
 
 	item._iIdentified = true;

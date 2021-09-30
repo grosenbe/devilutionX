@@ -2,13 +2,16 @@
 
 #include <algorithm>
 #include <string>
+#ifdef USE_SDL1
+#include <codecvt>
+#include <locale>
+#include <cassert>
+#endif
 
 #include "DiabloUI/art_draw.h"
 #include "DiabloUI/button.h"
 #include "DiabloUI/dialogs.h"
-#include "DiabloUI/fonts.h"
 #include "DiabloUI/scrollbar.h"
-#include "DiabloUI/text_draw.h"
 #include "controls/controller.h"
 #include "controls/menu_controls.h"
 #include "dx.h"
@@ -21,8 +24,8 @@
 #include "utils/sdl_compat.h"
 #include "utils/sdl_wrap.h"
 #include "utils/stubs.h"
-#include "utils/utf8.h"
 #include "utils/language.h"
+#include "utils/utf8.h"
 
 #ifdef __SWITCH__
 // for virtual keyboard on Switch
@@ -224,17 +227,15 @@ void UiFocusPageDown()
 	}
 }
 
-void SelheroCatToName(char *inBuf, char *outBuf, int cnt)
+void SelheroCatToName(const char *inBuf, char *outBuf, int cnt)
 {
-	std::string output = utf8_to_latin1(inBuf);
-	strncat(outBuf, output.c_str(), cnt - strlen(outBuf));
+	strncat(outBuf, inBuf, cnt - strlen(outBuf));
 }
 
 #ifdef __vita__
-void selhero_SetName(char *in_buf, char *out_buf, int cnt)
+void selhero_SetName(const char *in_buf, char *out_buf, int cnt)
 {
-	std::string output = utf8_to_latin1(in_buf);
-	strncpy(out_buf, output.c_str(), cnt);
+	strncpy(out_buf, in_buf, cnt);
 }
 #endif
 
@@ -328,10 +329,7 @@ void UiFocusNavigation(SDL_Event *event)
 #endif
 			case SDLK_BACKSPACE:
 			case SDLK_LEFT: {
-				int nameLen = strlen(UiTextInput);
-				if (nameLen > 0) {
-					UiTextInput[nameLen - 1] = '\0';
-				}
+				UiTextInput[FindLastUtf8Symbols(UiTextInput)] = '\0';
 				return;
 			}
 			default:
@@ -340,12 +338,9 @@ void UiFocusNavigation(SDL_Event *event)
 #ifdef USE_SDL1
 			if ((event->key.keysym.mod & KMOD_CTRL) == 0) {
 				Uint16 unicode = event->key.keysym.unicode;
-				if (unicode && (unicode & 0xFF80) == 0) {
-					char utf8[SDL_TEXTINPUTEVENT_TEXT_SIZE];
-					utf8[0] = (char)unicode;
-					utf8[1] = '\0';
-					SelheroCatToName(utf8, UiTextInput, UiTextInputLen);
-				}
+				std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> convert;
+				std::string utf8 = convert.to_bytes(unicode);
+				SelheroCatToName(utf8.c_str(), UiTextInput, UiTextInputLen);
 			}
 #endif
 			break;
@@ -544,14 +539,6 @@ void UiInitialize()
 {
 	LoadUiGFX();
 
-	LoadFont(GameFont12, ColorSilver, "fonts\\grayui.trn");
-	LoadFont(GameFont12, ColorGold, "fonts\\goldui.trn");
-	LoadFont(GameFont24, ColorSilver, "fonts\\grayui.trn");
-	LoadFont(GameFont24, ColorGold, "fonts\\goldui.trn");
-	LoadFont(GameFont30, ColorSilver, "fonts\\grayui.trn");
-	LoadFont(GameFont30, ColorGold, "fonts\\goldui.trn");
-	LoadFont(GameFont42, ColorGold, "fonts\\goldui.trn");
-
 	if (ArtCursor.surface != nullptr) {
 		if (SDL_ShowCursor(SDL_DISABLE) <= -1) {
 			ErrSdl();
@@ -561,7 +548,6 @@ void UiInitialize()
 
 void UiDestroy()
 {
-	UnloadTtfFont();
 	UnloadFonts();
 	UnloadUiGFX();
 }
@@ -726,12 +712,10 @@ namespace {
 
 void Render(UiText *uiText)
 {
-	DrawTTF(uiText->m_text,
-	    uiText->m_rect,
-	    uiText->m_iFlags,
-	    uiText->m_color,
-	    uiText->m_shadow_color,
-	    uiText->m_render_cache);
+	Rectangle rect { { uiText->m_rect.x, uiText->m_rect.y }, { uiText->m_rect.w, uiText->m_rect.h } };
+
+	const Surface &out = Surface(DiabloUiSurface());
+	DrawString(out, uiText->m_text, rect, uiText->m_iFlags | UiFlags::FontSizeDialog, 0);
 }
 
 void Render(const UiArtText *uiArtText)

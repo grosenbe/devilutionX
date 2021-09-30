@@ -357,15 +357,25 @@ struct Item {
 		}
 	}
 
+	[[nodiscard]] bool IsScroll() const
+	{
+		return _iMiscId == IMISC_SCROLL || _iMiscId == IMISC_SCROLLT;
+	}
+
+	[[nodiscard]] bool IsScrollOf(spell_id spellId) const
+	{
+		return IsScroll() && _iSpell == spellId;
+	}
+
 	UiFlags getTextColor() const
 	{
 		switch (_iMagical) {
 		case ITEM_QUALITY_MAGIC:
 			return UiFlags::ColorBlue;
 		case ITEM_QUALITY_UNIQUE:
-			return UiFlags::ColorGold;
+			return UiFlags::ColorWhitegold;
 		default:
-			return UiFlags::ColorSilver;
+			return UiFlags::ColorWhite;
 		}
 	}
 
@@ -484,7 +494,8 @@ void PutItemRecord(int nSeed, uint16_t wCI, int nIndex);
 void initItemGetRecords();
 
 #ifdef _DEBUG
-std::string DebugSpawnItem(std::string itemName, bool unique);
+std::string DebugSpawnItem(std::string itemName);
+std::string DebugSpawnUniqueItem(std::string itemName);
 #endif
 /* data */
 

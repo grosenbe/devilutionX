@@ -19,6 +19,8 @@
 #endif
 #include "DiabloUI/diabloui.h"
 #include "controls/keymapper.hpp"
+#include "controls/touch/gamepad.h"
+#include "controls/touch/renderers.h"
 #include "diablo.h"
 #include "doom.h"
 #include "drlg_l1.h"
@@ -65,6 +67,10 @@
 #include "utils/language.h"
 #include "utils/paths.h"
 
+#ifdef __vita__
+#include "platform/vita/touch.h"
+#endif
+
 #ifdef GPERF_HEAP_FIRST_GAME_ITERATION
 #include <gperftools/heap-profiler.h>
 #endif
@@ -96,11 +102,7 @@ std::array<Keymapper::ActionIndex, 4> quickSpellActionIndexes;
 
 bool gbForceWindowed = false;
 #ifdef _DEBUG
-bool monstdebug = false;
-_monster_id DebugMonsters[10];
-int debugmonsttypes = 0;
-bool debug_mode_key_inverted_v = false;
-bool debug_mode_key_i = false;
+bool DebugDisableNetworkTimeout = false;
 std::vector<std::string> DebugCmdsFromCommandLine;
 #endif
 /** Specifies whether players are in non-PvP mode. */
@@ -118,7 +120,6 @@ MouseActionType LastMouseButtonAction = MouseActionType::None;
 
 // Controller support: Actions to run after updating the cursor state.
 // Defined in SourceX/controls/plctrls.cpp.
-extern void finish_simulated_mouse_clicks(int currentMouseX, int currentMouseY);
 extern void plrctrls_after_check_curs_move();
 extern void plrctrls_every_frame();
 extern void plrctrls_after_game_logic();
@@ -192,7 +193,7 @@ bool ProcessInput()
 	}
 
 	if (!gmenu_is_active() && sgnTimeoutCurs == CURSOR_NONE) {
-#ifndef USE_SDL1
+#ifdef __vita__
 		finish_simulated_mouse_clicks(MousePosition.x, MousePosition.y);
 #endif
 		CheckCursMove();
@@ -307,6 +308,7 @@ void LeftMouseDown(int wParam)
 	}
 
 	bool isShiftHeld = (wParam & DVL_MK_SHIFT) != 0;
+	bool isCtrlHeld = (wParam & DVL_MK_CTRL) != 0;
 
 	if (!MainPanel.Contains(MousePosition)) {
 		if (!gmenu_is_active() && !TryIconCurs()) {
@@ -319,7 +321,7 @@ void LeftMouseDown(int wParam)
 				CheckChrBtns();
 			} else if (invflag && RightPanel.Contains(MousePosition)) {
 				if (!dropGoldFlag)
-					CheckInvItem(isShiftHeld);
+					CheckInvItem(isShiftHeld, isCtrlHeld);
 			} else if (sbookflag && RightPanel.Contains(MousePosition)) {
 				CheckSBook();
 			} else if (pcurs >= CURSOR_FIRSTITEM) {
@@ -336,7 +338,7 @@ void LeftMouseDown(int wParam)
 		}
 	} else {
 		if (!talkflag && !dropGoldFlag && !gmenu_is_active())
-			CheckInvScrn(isShiftHeld);
+			CheckInvScrn(isShiftHeld, isCtrlHeld);
 		DoPanBtn();
 		if (pcurs > CURSOR_HAND && pcurs < CURSOR_FIRSTITEM)
 			NewCursor(CURSOR_HAND);
@@ -358,7 +360,7 @@ void LeftMouseUp(int wParam)
 		ReleaseStoreBtn();
 }
 
-void RightMouseDown()
+void RightMouseDown(bool isShiftHeld)
 {
 	LastMouseButtonAction = MouseActionType::None;
 
@@ -381,7 +383,7 @@ void RightMouseDown()
 	    && (pcursinvitem == -1 || !UseInvItem(MyPlayerId, pcursinvitem))) {
 		if (pcurs == CURSOR_HAND) {
 			if (pcursinvitem == -1 || !UseInvItem(MyPlayerId, pcursinvitem))
-				CheckPlrSpell();
+				CheckPlrSpell(isShiftHeld);
 		} else if (pcurs > CURSOR_HAND && pcurs < CURSOR_FIRSTITEM) {
 			NewCursor(CURSOR_HAND);
 		}
@@ -402,7 +404,7 @@ void ReleaseKey(int vkey)
 		CaptureScreen();
 	if (vkey == DVL_VK_MENU || vkey == DVL_VK_LMENU || vkey == DVL_VK_RMENU)
 		AltPressed(false);
-	if (vkey == DVL_VK_CONTROL || vkey == DVL_VK_LCONTROL || vkey == DVL_VK_RCONTROL)
+	if (vkey == DVL_VK_RCONTROL)
 		ToggleItemLabelHighlight();
 }
 
@@ -536,7 +538,7 @@ void PressKey(int vkey)
  */
 void PressChar(char vkey)
 {
-	if (gmenu_is_active() || control_talk_last_key(vkey) || sgnTimeoutCurs != CURSOR_NONE || MyPlayerIsDead) {
+	if (gmenu_is_active() || IsTalkActive() || sgnTimeoutCurs != CURSOR_NONE || MyPlayerIsDead) {
 		return;
 	}
 	if (vkey == 'p' || vkey == 'P') {
@@ -569,27 +571,11 @@ void PressChar(char vkey)
 		}
 		return;
 #ifdef _DEBUG
-	case 'D':
-		PrintDebugPlayer(true);
-		return;
-	case 'd':
-		PrintDebugPlayer(false);
-		return;
 	case 'M':
 		NextDebugMonster();
 		return;
 	case 'm':
 		GetDebugMonster();
-		return;
-	case 'T':
-	case 't':
-		if (debug_mode_key_inverted_v) {
-			auto &myPlayer = Players[MyPlayerId];
-			sprintf(tempstr, "PX = %i  PY = %i", myPlayer.position.tile.x, myPlayer.position.tile.y);
-			NetSendCmdString(1 << MyPlayerId, tempstr);
-			sprintf(tempstr, "CX = %i  CY = %i  DP = %i", cursPosition.x, cursPosition.y, dungeon[cursPosition.x][cursPosition.y]);
-			NetSendCmdString(1 << MyPlayerId, tempstr);
-		}
 		return;
 #endif
 	}
@@ -646,7 +632,7 @@ void GameEventHandler(uint32_t uMsg, int32_t wParam, int32_t lParam)
 		GetMousePos(lParam);
 		if (sgbMouseDown == CLICK_NONE) {
 			sgbMouseDown = CLICK_RIGHT;
-			RightMouseDown();
+			RightMouseDown((wParam & DVL_MK_SHIFT) != 0);
 		}
 		return;
 	case DVL_WM_RBUTTONUP:
@@ -796,8 +782,6 @@ void RunGameLoop(interface_mode uMsg)
 	printInConsole("    %-20s %-30s\n", /* TRANSLATORS: Commandline Option */ "--data-dir", _("Specify the folder of diabdat.mpq"));
 	printInConsole("    %-20s %-30s\n", /* TRANSLATORS: Commandline Option */ "--save-dir", _("Specify the folder of save files"));
 	printInConsole("    %-20s %-30s\n", /* TRANSLATORS: Commandline Option */ "--config-dir", _("Specify the location of diablo.ini"));
-	printInConsole("    %-20s %-30s\n", /* TRANSLATORS: Commandline Option */ "--ttf-dir", _("Specify the location of the .ttf font"));
-	printInConsole("    %-20s %-30s\n", /* TRANSLATORS: Commandline Option */ "--ttf-name", _("Specify the name of a custom .ttf font"));
 	printInConsole("    %-20s %-30s\n", /* TRANSLATORS: Commandline Option */ "-n", _("Skip startup videos"));
 	printInConsole("    %-20s %-30s\n", /* TRANSLATORS: Commandline Option */ "-f", _("Display frames per second"));
 	printInConsole("    %-20s %-30s\n", /* TRANSLATORS: Commandline Option */ "-x", _("Run in windowed mode"));
@@ -811,9 +795,7 @@ void RunGameLoop(interface_mode uMsg)
 	printInConsole("    %-20s %-30s\n", /* TRANSLATORS: Commandline Option */ "--nestart", _("Use alternate nest palette"));
 #ifdef _DEBUG
 	printInConsole("\nDebug options:\n");
-	printInConsole("    %-20s %-30s\n", "-^", "Enable debug tools");
 	printInConsole("    %-20s %-30s\n", "-i", "Ignore network timeout");
-	printInConsole("    %-20s %-30s\n", "-m <##>", "Add debug monster, up to 10 allowed");
 	printInConsole("    %-20s %-30s\n", "+<internal command>", "Pass commands to the engine");
 #endif
 	printInConsole("%s", _("\nReport bugs at https://github.com/diasurgical/devilutionX/\n"));
@@ -850,10 +832,6 @@ void DiabloParseFlags(int argc, char **argv)
 			paths::SetConfigPath(argv[++i]);
 		} else if (strcasecmp("--lang-dir", argv[i]) == 0) {
 			paths::SetLangPath(argv[++i]);
-		} else if (strcasecmp("--ttf-dir", argv[i]) == 0) {
-			paths::SetTtfPath(argv[++i]);
-		} else if (strcasecmp("--ttf-name", argv[i]) == 0) {
-			paths::SetTtfName(argv[++i]);
 		} else if (strcasecmp("-n", argv[i]) == 0) {
 			gbShowIntro = false;
 		} else if (strcasecmp("-f", argv[i]) == 0) {
@@ -871,13 +849,8 @@ void DiabloParseFlags(int argc, char **argv)
 		} else if (strcasecmp("--verbose", argv[i]) == 0) {
 			SDL_LogSetAllPriority(SDL_LOG_PRIORITY_VERBOSE);
 #ifdef _DEBUG
-		} else if (strcasecmp("-^", argv[i]) == 0) {
-			debug_mode_key_inverted_v = true;
 		} else if (strcasecmp("-i", argv[i]) == 0) {
-			debug_mode_key_i = true;
-		} else if (strcasecmp("-m", argv[i]) == 0) {
-			monstdebug = true;
-			DebugMonsters[debugmonsttypes++] = (_monster_id)SDL_atoi(argv[++i]);
+			DebugDisableNetworkTimeout = true;
 		} else if (argv[i][0] == '+') {
 			if (!currentCommand.empty())
 				DebugCmdsFromCommandLine.push_back(currentCommand);
@@ -953,6 +926,10 @@ void DiabloInit()
 		strncpy(sgOptions.Chat.szHotKeyMsgs[i], _(QuickMessages[i].message), MAX_SEND_STR_LEN);
 	}
 
+#if defined(VIRTUAL_GAMEPAD) && !defined(USE_SDL1)
+	InitializeVirtualGamepad();
+#endif
+
 	UiInitialize();
 	UiSetSpawned(gbIsSpawn);
 	was_ui_init = true;
@@ -1004,8 +981,6 @@ void DiabloDeinit()
 		init_cleanup();
 	if (was_window_init)
 		dx_cleanup(); // Cleanup SDL surfaces stuff, so we have to do it before SDL_Quit().
-	if (was_fonts_init)
-		FontsCleanup();
 	UnloadFonts();
 	if (SDL_WasInit(SDL_INIT_EVERYTHING & ~SDL_INIT_HAPTIC) != 0)
 		SDL_Quit();
@@ -1074,6 +1049,9 @@ void LoadLvlGFX()
 void LoadAllGFX()
 {
 	IncProgress();
+#if defined(VIRTUAL_GAMEPAD) && !defined(USE_SDL1)
+	InitVirtualGamepadGFX(renderer);
+#endif
 	IncProgress();
 	InitObjectGFX();
 	IncProgress();
@@ -1129,6 +1107,28 @@ void CreateLevel(lvl_entry lvldir)
 	}
 }
 
+void UnstuckChargers()
+{
+	if (gbIsMultiplayer) {
+		for (auto &player : Players) {
+			if (!player.plractive)
+				continue;
+			if (player._pLvlChanging)
+				continue;
+			if (player.plrlevel != MyPlayer->plrlevel)
+				continue;
+			if (&player == MyPlayer)
+				continue;
+			return;
+		}
+	}
+	for (int i = 0; i < ActiveMonsterCount; i++) {
+		auto &monster = Monsters[ActiveMonsters[i]];
+		if (monster._mmode == MonsterMode::Charge)
+			monster._mmode = MonsterMode::Stand;
+	}
+}
+
 void UpdateMonsterLights()
 {
 	for (int i = 0; i < ActiveMonsterCount; i++) {
@@ -1178,7 +1178,7 @@ void GameLogic()
 	gGameLogicStep = GameLogicStep::None;
 
 #ifdef _DEBUG
-	if (debug_mode_key_inverted_v && GetAsyncKeyState(DVL_VK_SHIFT)) {
+	if (DebugScrollViewEnabled && GetAsyncKeyState(DVL_VK_SHIFT)) {
 		ScrollView();
 	}
 #endif
@@ -1240,24 +1240,6 @@ void HelpKeyPressed()
 		doom_close();
 	}
 }
-
-#ifdef _DEBUG
-void ItemInfoKeyPressed()
-{
-	auto &item = Items[pcursitem];
-	if (pcursitem != -1) {
-		sprintf(
-		    tempstr,
-		    "IDX = %i  :  Seed = %i  :  CF = %i",
-		    item.IDidx,
-		    item._iSeed,
-		    item._iCreateInfo);
-		NetSendCmdString(1 << MyPlayerId, tempstr);
-	}
-	sprintf(tempstr, "Numitems : %i", ActiveItemCount);
-	NetSendCmdString(1 << MyPlayerId, tempstr);
-}
-#endif
 
 void InventoryKeyPressed()
 {
@@ -1368,20 +1350,6 @@ void InitKeymapActions()
 	    HelpKeyPressed,
 	    [&]() { return !IsPlayerDead(); },
 	});
-#ifdef _DEBUG
-	keymapper.AddAction({
-	    "ItemInfo",
-	    DVL_VK_INVALID,
-	    ItemInfoKeyPressed,
-	    [&]() { return !IsPlayerDead(); },
-	});
-	keymapper.AddAction({
-	    "QuestDebug",
-	    DVL_VK_INVALID,
-	    PrintDebugQuest,
-	    [&]() { return !IsPlayerDead(); },
-	});
-#endif
 	for (int i = 0; i < 4; ++i) {
 		quickSpellActionIndexes[i] = keymapper.AddAction({
 		    std::string("QuickSpell") + std::to_string(i + 1),
@@ -1458,16 +1426,17 @@ void InitKeymapActions()
 	    "GameInfo",
 	    'V',
 	    [] {
-		    char pszStr[120];
+		    char pszStr[MAX_SEND_STR_LEN];
 		    const char *difficulties[3] = {
 			    _("Normal"),
 			    _("Nightmare"),
 			    _("Hell"),
 		    };
-		    strcpy(pszStr, fmt::format(_(/* TRANSLATORS: {:s} means: Character Name, Game Version, Game Difficulty. */
-		                                   "{:s}, version = {:s}, mode = {:s}"),
-		                       gszProductName, PROJECT_VERSION, difficulties[sgGameInitInfo.nDifficulty])
-		                       .c_str());
+		    strncpy(pszStr, fmt::format(_(/* TRANSLATORS: {:s} means: Character Name, Game Version, Game Difficulty. */
+		                                    "{:s}, version = {:s}, mode = {:s}"),
+		                        PROJECT_NAME, PROJECT_VERSION, difficulties[sgGameInitInfo.nDifficulty])
+		                        .c_str(),
+		        MAX_SEND_STR_LEN - 1);
 		    NetSendCmdString(1 << MyPlayerId, pszStr);
 	    },
 	    [&]() { return !IsPlayerDead(); },
@@ -1520,18 +1489,6 @@ void InitKeymapActions()
 #endif
 }
 
-void LoadGameFonts()
-{
-	LoadFont(GameFont12, ColorSilver, "fonts\\white.trn");
-	LoadFont(GameFont12, ColorGold, "fonts\\whitegold.trn");
-	LoadFont(GameFont12, ColorRed, "fonts\\red.trn");
-	LoadFont(GameFont12, ColorBlue, "fonts\\blue.trn");
-	LoadFont(GameFont12, ColorBlack, "fonts\\black.trn");
-	LoadFont(GameFont30, ColorGold);
-	LoadFont(GameFont46, ColorGold);
-	LoadFont(GameFont46, ColorBlack, "fonts\\black.trn");
-}
-
 } // namespace
 
 void FreeGameMem()
@@ -1548,6 +1505,9 @@ void FreeGameMem()
 	FreeObjectGFX();
 	FreeMonsterSnd();
 	FreeTownerGFX();
+#if defined(VIRTUAL_GAMEPAD) && !defined(USE_SDL1)
+	FreeVirtualGamepadGFX();
+#endif
 }
 
 bool StartGame(bool bNewGame, bool bSinglePlayer)
@@ -1565,7 +1525,6 @@ bool StartGame(bool bNewGame, bool bSinglePlayer)
 		// Save 2.8 MiB of RAM by freeing all main menu resources
 		// before starting the game.
 		UiDestroy();
-		LoadGameFonts();
 
 		gbSelectProvider = false;
 
@@ -1882,6 +1841,9 @@ void LoadGameLevel(bool firstflag, lvl_entry lvldir)
 			LoadAllGFX();
 		} else {
 			IncProgress();
+#if defined(VIRTUAL_GAMEPAD) && !defined(USE_SDL1)
+			InitVirtualGamepadGFX(renderer);
+#endif
 			IncProgress();
 			InitMissileGFX(gbIsHellfire);
 			IncProgress();
@@ -1982,6 +1944,9 @@ void LoadGameLevel(bool firstflag, lvl_entry lvldir)
 		IncProgress();
 		InitMonsters();
 		IncProgress();
+#if defined(VIRTUAL_GAMEPAD) && !defined(USE_SDL1)
+		InitVirtualGamepadGFX(renderer);
+#endif
 		InitMissileGFX(gbIsHellfire);
 		IncProgress();
 		InitCorpses();
@@ -2043,6 +2008,7 @@ void LoadGameLevel(bool firstflag, lvl_entry lvldir)
 	}
 	IncProgress();
 	UpdateMonsterLights();
+	UnstuckChargers();
 	if (leveltype != DTYPE_TOWN) {
 		ProcessLightList();
 		ProcessVisionList();

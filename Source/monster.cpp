@@ -161,7 +161,7 @@ void InitMonster(Monster &monster, Direction rd, int mtype, Point position)
 	monster._mmode = MonsterMode::Stand;
 	monster.MType = &LevelMonsterTypes[mtype];
 	monster.MData = monster.MType->MData;
-	monster.mName = _(monster.MData->mName);
+	monster.mName = pgettext("monster", monster.MData->mName);
 	monster.AnimInfo = {};
 	monster.ChangeAnimationData(MonsterGraphic::Stand);
 	monster.AnimInfo.TickCounterOfCurrentFrame = GenerateRnd(monster.AnimInfo.TicksPerFrame - 1);
@@ -488,7 +488,7 @@ void PlaceUniqueMonst(int uniqindex, int miniontype, int bosspacksize)
 	}
 
 	monster.mExp *= 2;
-	monster.mName = _(uniqueMonsterData.mName);
+	monster.mName = pgettext("monster", uniqueMonsterData.mName);
 	monster._mmaxhp = uniqueMonsterData.mmaxhp << 6;
 
 	if (!gbIsMultiplayer)
@@ -973,9 +973,8 @@ void StartWalk3(int i, int xvel, int yvel, int xoff, int yoff, int xadd, int yad
 		ChangeLightXY(monster.mlid, { x, y });
 
 	dMonster[monster.position.tile.x][monster.position.tile.y] = -(i + 1);
-	dMonster[fx][fy] = -(i + 1);
+	dMonster[fx][fy] = i + 1;
 	monster.position.temp = { x, y };
-	dFlags[x][y] |= BFLAG_MONSTLR;
 	monster.position.old = monster.position.tile;
 	monster.position.future = { fx, fy };
 	monster.position.offset = { xoff, yoff };
@@ -1356,7 +1355,7 @@ bool MonsterWalk(int i, MonsterMode variant)
 		case MonsterMode::MoveSideways:
 			dMonster[monster.position.tile.x][monster.position.tile.y] = 0;
 			monster.position.tile = { monster._mVar1, monster._mVar2 };
-			dFlags[monster.position.temp.x][monster.position.temp.y] &= ~BFLAG_MONSTLR;
+			// dMonster is set here for backwards comparability, without it the monster would be invisible if loaded from a vanilla save.
 			dMonster[monster.position.tile.x][monster.position.tile.y] = i + 1;
 			break;
 		default:
@@ -3643,29 +3642,20 @@ void GetLevelMTypes()
 			}
 		}
 
-#ifdef _DEBUG
-		if (monstdebug) {
-			for (int i = 0; i < debugmonsttypes; i++)
-				AddMonsterType(DebugMonsters[i], PLACE_SCATTER);
-		} else
-#endif
-		{
-
-			while (nt > 0 && LevelMonsterTypeCount < MAX_LVLMTYPES && monstimgtot < 4000) {
-				for (int i = 0; i < nt;) {
-					if (MonstersData[typelist[i]].mImage > 4000 - monstimgtot) {
-						typelist[i] = typelist[--nt];
-						continue;
-					}
-
-					i++;
-				}
-
-				if (nt != 0) {
-					int i = GenerateRnd(nt);
-					AddMonsterType(typelist[i], PLACE_SCATTER);
+		while (nt > 0 && LevelMonsterTypeCount < MAX_LVLMTYPES && monstimgtot < 4000) {
+			for (int i = 0; i < nt;) {
+				if (MonstersData[typelist[i]].mImage > 4000 - monstimgtot) {
 					typelist[i] = typelist[--nt];
+					continue;
 				}
+
+				i++;
+			}
+
+			if (nt != 0) {
+				int i = GenerateRnd(nt);
+				AddMonsterType(typelist[i], PLACE_SCATTER);
+				typelist[i] = typelist[--nt];
 			}
 		}
 
@@ -3920,7 +3910,7 @@ void AddDoppelganger(Monster &monster)
 	}
 }
 
-bool M_Talker(Monster &monster)
+bool M_Talker(const Monster &monster)
 {
 	return IsAnyOf(monster._mAi, AI_LAZARUS, AI_WARLORD, AI_GARBUD, AI_ZHAR, AI_SNOTSPIL, AI_LACHDAN, AI_LAZHELP);
 }
@@ -3958,11 +3948,6 @@ void M_ClearSquares(int i)
 			}
 		}
 	}
-
-	if (mx + 1 < MAXDUNX)
-		dFlags[mx + 1][my] &= ~BFLAG_MONSTLR;
-	if (my + 1 < MAXDUNY)
-		dFlags[mx][my + 1] &= ~BFLAG_MONSTLR;
 }
 
 void M_GetKnockback(int i)
@@ -4401,10 +4386,10 @@ bool DirOK(int i, Direction mdir)
 	if (futurePosition.y < 0 || futurePosition.y >= MAXDUNY || futurePosition.x < 0 || futurePosition.x >= MAXDUNX || !IsTileAvailable(monster, futurePosition))
 		return false;
 	if (mdir == Direction::East) {
-		if (IsTileSolid(position + Direction::SouthEast) || (dFlags[position.x + 1][position.y] & BFLAG_MONSTLR) != 0)
+		if (IsTileSolid(position + Direction::SouthEast))
 			return false;
 	} else if (mdir == Direction::West) {
-		if (IsTileSolid(position + Direction::SouthWest) || (dFlags[position.x][position.y + 1] & BFLAG_MONSTLR) != 0)
+		if (IsTileSolid(position + Direction::SouthWest))
 			return false;
 	} else if (mdir == Direction::North) {
 		if (IsTileSolid(position + Direction::NorthEast) || IsTileSolid(position + Direction::NorthWest))
@@ -4439,7 +4424,7 @@ bool DirOK(int i, Direction mdir)
 
 bool PosOkMissile(Point position)
 {
-	return !nMissileTable[dPiece[position.x][position.y]] && (dFlags[position.x][position.y] & BFLAG_MONSTLR) == 0;
+	return !nMissileTable[dPiece[position.x][position.y]];
 }
 
 bool LineClearMissile(Point startPoint, Point endPoint)
@@ -4524,11 +4509,18 @@ bool LineClear(const std::function<bool(Point)> &clear, Point startPoint, Point 
 void SyncMonsterAnim(Monster &monster)
 {
 	monster.MType = &LevelMonsterTypes[monster._mMTidx];
+#ifdef _DEBUG
+	// fix for saves with debug monsters having type originally not on the level
+	if (LevelMonsterTypes[monster._mMTidx].MData == nullptr) {
+		InitMonsterGFX(monster._mMTidx);
+		LevelMonsterTypes[monster._mMTidx].mdeadval = 1;
+	}
+#endif
 	monster.MData = LevelMonsterTypes[monster._mMTidx].MData;
 	if (monster._uniqtype != 0)
-		monster.mName = _(UniqueMonstersData[monster._uniqtype - 1].mName);
+		monster.mName = pgettext("monster", UniqueMonstersData[monster._uniqtype - 1].mName);
 	else
-		monster.mName = _(monster.MData->mName);
+		monster.mName = pgettext("monster", monster.MData->mName);
 
 	MonsterGraphic graphic = MonsterGraphic::Stand;
 

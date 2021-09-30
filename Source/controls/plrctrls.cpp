@@ -1416,7 +1416,7 @@ void PerformSpellAction()
 			TryIconCurs();
 			NewCursor(CURSOR_HAND);
 		} else {
-			CheckInvItem(true);
+			CheckInvItem(true, false);
 			ResetInvCursorPosition();
 		}
 		return;
@@ -1441,7 +1441,7 @@ void PerformSpellAction()
 	}
 
 	UpdateSpellTarget();
-	CheckPlrSpell();
+	CheckPlrSpell(false);
 }
 
 void CtrlUseInvItem()
@@ -1458,12 +1458,12 @@ void CtrlUseInvItem()
 	else
 		item = &myPlayer.SpdList[pcursinvitem - INVITEM_BELT_FIRST];
 
-	if ((item->_iMiscId == IMISC_SCROLLT || item->_iMiscId == IMISC_SCROLL) && spelldata[item->_iSpell].sTargeted) {
+	if (item->IsScroll() && spelldata[item->_iSpell].sTargeted) {
 		return;
 	}
 
 	if (item->isEquipment()) {
-		CheckInvItem(true); // auto-equip if it's an equipment
+		CheckInvItem(true, false); // auto-equip if it's an equipment
 		ResetInvCursorPosition();
 	} else {
 		UseInvItem(MyPlayerId, pcursinvitem);

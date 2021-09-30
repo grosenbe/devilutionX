@@ -67,7 +67,6 @@ extern bool gbLoadGame;
 extern bool cineflag;
 extern int force_redraw;
 /* These are defined in fonts.h */
-extern bool was_fonts_init;
 extern void FontsCleanup();
 extern int PauseMode;
 extern bool gbNestArt;
@@ -106,11 +105,7 @@ void diablo_color_cyc_logic();
 extern Keymapper keymapper;
 extern bool gbForceWindowed;
 #ifdef _DEBUG
-extern bool monstdebug;
-extern _monster_id DebugMonsters[10];
-extern int debugmonsttypes;
-extern bool debug_mode_key_inverted_v;
-extern bool debug_mode_key_i;
+extern bool DebugDisableNetworkTimeout;
 #endif
 
 struct QuickMessage {

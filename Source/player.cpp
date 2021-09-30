@@ -18,6 +18,7 @@
 #include "engine/random.hpp"
 #include "gamemenu.h"
 #include "init.h"
+#include "inv_iterators.hpp"
 #include "lighting.h"
 #include "loadsave.h"
 #include "minitext.h"
@@ -270,10 +271,7 @@ void WalkSides(int pnum, const DirectionSettings &walkParams)
 	Point const nextPosition = player.position.tile + walkParams.map;
 
 	dPlayer[player.position.tile.x][player.position.tile.y] = -(pnum + 1);
-	dPlayer[player.position.future.x][player.position.future.y] = -(pnum + 1);
-	player._pVar4 = nextPosition.x;
-	player._pVar5 = nextPosition.y;
-	dFlags[nextPosition.x][nextPosition.y] |= BFLAG_PLAYERLR;
+	dPlayer[player.position.future.x][player.position.future.y] = pnum + 1;
 
 	if (leveltype != DTYPE_TOWN) {
 		ChangeLightXY(player._plid, nextPosition);
@@ -333,11 +331,11 @@ bool PlrDirOK(const Player &player, Direction dir)
 	}
 
 	if (dir == Direction::East) {
-		return !IsTileSolid(position + Direction::SouthEast) && (dFlags[position.x + 1][position.y] & BFLAG_PLAYERLR) == 0;
+		return !IsTileSolid(position + Direction::SouthEast);
 	}
 
 	if (dir == Direction::West) {
-		return !IsTileSolid(position + Direction::SouthWest) && (dFlags[position.x][position.y + 1] & BFLAG_PLAYERLR) == 0;
+		return !IsTileSolid(position + Direction::SouthWest);
 	}
 
 	return true;
@@ -400,6 +398,8 @@ void SetPlayerGPtrs(const char *path, std::unique_ptr<byte[]> &data, std::array<
 {
 	data = nullptr;
 	data = LoadFileInMem(path);
+	if (data == nullptr && gbQuietMode)
+		return;
 
 	for (int i = 0; i < 8; i++) {
 		byte *pCelStart = CelGetFrame(data.get(), i);
@@ -411,8 +411,7 @@ void ClearStateVariables(Player &player)
 {
 	player.position.temp = { 0, 0 };
 	player.tempDirection = Direction::South;
-	player._pVar4 = 0;
-	player._pVar5 = 0;
+	player.spellLevel = 0;
 	player.position.offset2 = { 0, 0 };
 	player.deathFrame = 0;
 }
@@ -566,7 +565,7 @@ void StartSpell(int pnum, Direction d, int cx, int cy)
 	SetPlayerOld(player);
 
 	player.position.temp = { cx, cy };
-	player._pVar4 = GetSpellLevel(pnum, player._pSpell);
+	player.spellLevel = GetSpellLevel(pnum, player._pSpell);
 }
 
 void RespawnDeadItem(Item *itm, Point target)
@@ -731,8 +730,8 @@ bool DoWalk(int pnum, int variant)
 			break;
 		case PM_WALK3:
 			dPlayer[player.position.tile.x][player.position.tile.y] = 0;
-			dFlags[player._pVar4][player._pVar5] &= ~BFLAG_PLAYERLR;
 			player.position.tile = player.position.temp;
+			// dPlayer is set here for backwards comparability, without it the player would be invisible if loaded from a vanilla save.
 			dPlayer[player.position.tile.x][player.position.tile.y] = pnum + 1;
 			break;
 		}
@@ -862,15 +861,18 @@ bool DamageWeapon(int pnum, int durrnd)
 	return false;
 }
 
-bool PlrHitMonst(int pnum, int m)
+bool PlrHitMonst(int pnum, int m, bool adjacentDamage = false)
 {
 	int hper = 0;
-	bool adjacentDamage = false;
 
 	if ((DWORD)m >= MAXMONSTERS) {
 		app_fatal("PlrHitMonst: illegal monster %i", m);
 	}
 	auto &monster = Monsters[m];
+
+	if ((DWORD)pnum >= MAX_PLRS) {
+		app_fatal("PlrHitMonst: illegal player %i", pnum);
+	}
 	auto &player = Players[pnum];
 
 	if ((monster._mhitpoints >> 6) <= 0) {
@@ -885,17 +887,11 @@ bool PlrHitMonst(int pnum, int m)
 		return false;
 	}
 
-	if (pnum < 0) {
-		adjacentDamage = true;
-		pnum = -pnum;
+	if (adjacentDamage) {
 		if (player._pLevel > 20)
 			hper -= 30;
 		else
 			hper -= (35 - player._pLevel) * 2;
-	}
-
-	if ((DWORD)pnum >= MAX_PLRS) {
-		app_fatal("PlrHitMonst: illegal player %i", pnum);
 	}
 
 	int hit = GenerateRnd(100);
@@ -1212,7 +1208,7 @@ bool DoAttack(int pnum)
 				m = -(dMonster[dx][dy] + 1);
 			}
 			didhit = PlrHitMonst(pnum, m);
-		} else if (dPlayer[dx][dy] != 0 && (!gbFriendlyMode || sgGameInitInfo.bFriendlyFire != 0)) {
+		} else if (dPlayer[dx][dy] != 0 && !gbFriendlyMode) {
 			BYTE p = dPlayer[dx][dy];
 			if (dPlayer[dx][dy] > 0) {
 				p = dPlayer[dx][dy] - 1;
@@ -1239,7 +1235,7 @@ bool DoAttack(int pnum)
 				int m = abs(dMonster[position.x][position.y]) - 1;
 				auto &monster = Monsters[m];
 				if (!CanTalkToMonst(monster) && monster.position.old == position) {
-					if (PlrHitMonst(-pnum, m))
+					if (PlrHitMonst(pnum, m, true))
 						didhit = true;
 				}
 			}
@@ -1248,7 +1244,7 @@ bool DoAttack(int pnum)
 				int m = abs(dMonster[position.x][position.y]) - 1;
 				auto &monster = Monsters[m];
 				if (!CanTalkToMonst(monster) && monster.position.old == position) {
-					if (PlrHitMonst(-pnum, m))
+					if (PlrHitMonst(pnum, m, true))
 						didhit = true;
 				}
 			}
@@ -1461,7 +1457,7 @@ bool DoSpell(int pnum)
 		    player.position.tile.y,
 		    player.position.temp.x,
 		    player.position.temp.y,
-		    player._pVar4);
+		    player.spellLevel);
 
 		if (player._pSplFrom == 0) {
 			EnsureValidReadiedSpell(player);
@@ -1706,22 +1702,22 @@ void CheckNewPath(int pnum, bool pmWillBeCalled)
 		case ACTION_SPELL:
 			d = GetDirection(player.position.tile, { player.destParam1, player.destParam2 });
 			StartSpell(pnum, d, player.destParam1, player.destParam2);
-			player._pVar4 = static_cast<int>(player.destParam3);
+			player.spellLevel = static_cast<int>(player.destParam3);
 			break;
 		case ACTION_SPELLWALL:
 			StartSpell(pnum, player.destParam3, player.destParam1, player.destParam2);
 			player.tempDirection = player.destParam3;
-			player._pVar4 = player.destParam4;
+			player.spellLevel = player.destParam4;
 			break;
 		case ACTION_SPELLMON:
 			d = GetDirection(player.position.tile, monster->position.future);
 			StartSpell(pnum, d, monster->position.future.x, monster->position.future.y);
-			player._pVar4 = player.destParam2;
+			player.spellLevel = player.destParam2;
 			break;
 		case ACTION_SPELLPLR:
 			d = GetDirection(player.position.tile, target->position.future);
 			StartSpell(pnum, d, target->position.future.x, target->position.future.y);
-			player._pVar4 = player.destParam2;
+			player.spellLevel = player.destParam2;
 			break;
 		case ACTION_OPERATE:
 			x = abs(player.position.tile.x - object->position.x);
@@ -1976,17 +1972,9 @@ void CheckCheatStats(Player &player)
 void Player::CalcScrolls()
 {
 	_pScrlSpells = 0;
-	for (int i = 0; i < _pNumInv; i++) {
-		if (!InvList[i].isEmpty() && (InvList[i]._iMiscId == IMISC_SCROLL || InvList[i]._iMiscId == IMISC_SCROLLT)) {
-			if (InvList[i]._iStatFlag)
-				_pScrlSpells |= GetSpellBitmask(InvList[i]._iSpell);
-		}
-	}
-
-	for (auto &item : SpdList) {
-		if (!item.isEmpty() && (item._iMiscId == IMISC_SCROLL || item._iMiscId == IMISC_SCROLLT)) {
-			if (item._iStatFlag)
-				_pScrlSpells |= GetSpellBitmask(item._iSpell);
+	for (Item &item : InventoryAndBeltPlayerItemsRange { *this }) {
+		if (item.IsScroll() && item._iStatFlag) {
+			_pScrlSpells |= GetSpellBitmask(item._iSpell);
 		}
 	}
 	EnsureValidReadiedSpell(*this);
@@ -2787,12 +2775,6 @@ void InitPlayer(Player &player, bool firstTime)
 		player._pAblSpells = GetSpellBitmask(SPL_BLODBOIL);
 	}
 
-#ifdef _DEBUG
-	if (debug_mode_key_inverted_v && firstTime) {
-		player._pMemSpells = SPL_INVALID;
-	}
-#endif
-
 	player._pNextExper = ExpLvlsTbl[player._pLevel];
 	player._pInvincible = false;
 
@@ -2927,27 +2909,12 @@ void FixPlrWalkTags(int pnum)
 			}
 		}
 	}
-
-	if (dx >= 0 && dx < MAXDUNX - 1 && dy >= 0 && dy < MAXDUNY - 1) {
-		dFlags[dx + 1][dy] &= ~BFLAG_PLAYERLR;
-		dFlags[dx][dy + 1] &= ~BFLAG_PLAYERLR;
-	}
 }
 
 void RemovePlrFromMap(int pnum)
 {
 	int pp = pnum + 1;
 	int pn = -(pnum + 1);
-
-	for (int y = 1; y < MAXDUNY; y++) {
-		for (int x = 1; x < MAXDUNX; x++) {
-			if (dPlayer[x][y - 1] == pn || dPlayer[x - 1][y] == pn) {
-				if ((dFlags[x][y] & BFLAG_PLAYERLR) != 0) {
-					dFlags[x][y] &= ~BFLAG_PLAYERLR;
-				}
-			}
-		}
-	}
 
 	for (int y = 0; y < MAXDUNY; y++) {
 		for (int x = 0; x < MAXDUNX; x++) // NOLINT(modernize-loop-convert)
@@ -3470,7 +3437,7 @@ void CalcPlrStaff(Player &player)
 	}
 }
 
-void CheckPlrSpell()
+void CheckPlrSpell(bool isShiftHeld)
 {
 	bool addflag = false;
 	int sl;
@@ -3550,11 +3517,11 @@ void CheckPlrSpell()
 		Direction sd = GetDirection(myPlayer.position.tile, cursPosition);
 		sl = GetSpellLevel(MyPlayerId, myPlayer._pRSpell);
 		NetSendCmdLocParam4(true, CMD_SPELLXYD, cursPosition, myPlayer._pRSpell, myPlayer._pRSplType, static_cast<uint16_t>(sd), sl);
-	} else if (pcursmonst != -1) {
+	} else if (pcursmonst != -1 && !isShiftHeld) {
 		LastMouseButtonAction = MouseActionType::SpellMonsterTarget;
 		sl = GetSpellLevel(MyPlayerId, myPlayer._pRSpell);
 		NetSendCmdParam4(true, CMD_SPELLID, pcursmonst, myPlayer._pRSpell, myPlayer._pRSplType, sl);
-	} else if (pcursplr != -1) {
+	} else if (pcursplr != -1 && !isShiftHeld) {
 		LastMouseButtonAction = MouseActionType::SpellPlayerTarget;
 		sl = GetSpellLevel(MyPlayerId, myPlayer._pRSpell);
 		NetSendCmdParam4(true, CMD_SPELLPID, pcursplr, myPlayer._pRSpell, myPlayer._pRSplType, sl);
@@ -3618,6 +3585,8 @@ void SyncPlrAnim(int pnum)
 	}
 
 	player.AnimInfo.pCelSprite = &*player.AnimationData[static_cast<size_t>(graphic)].CelSpritesForDirections[static_cast<size_t>(player._pdir)];
+	// Ensure ScrollInfo is initialized correctly
+	ScrollViewPort(player, WalkSettings[static_cast<size_t>(player._pdir)].scrollDir);
 }
 
 void SyncInitPlrPos(int pnum)

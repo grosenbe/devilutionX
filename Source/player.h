@@ -242,10 +242,8 @@ struct Player {
 	bool _pInfraFlag;
 	/** Player's direction when ending movement. Also used for casting direction of SPL_FIREWALL. */
 	Direction tempDirection;
-	/** Used for spell level, and X component of _pVar5 */
-	int _pVar4;
-	/** Used for storing position of a tile which should have its BFLAG_PLAYERLR flag removed after walking. When starting to walk the game places the player in the dPlayer array -1 in the Y coordinate, and uses BFLAG_PLAYERLR to check if it should be using -1 to the Y coordinate when rendering the player (also used for storing the level of a spell when the player casts it) */
-	int _pVar5;
+	/** Used for spell level */
+	int spellLevel;
 	/** Used for stalling the appearance of the options screen after dying in singleplayer */
 	int deathFrame;
 	bool _pLvlVisited[NUMLEVELS];
@@ -378,7 +376,7 @@ struct Player {
 
 	/**
 	 * @brief Says a speech line.
-	 * @todo BUGFIX Prevent more then one speech to be played at a time (reject new requests).
+	 * @todo BUGFIX Prevent more than one speech to be played at a time (reject new requests).
 	 */
 	void Say(HeroSpeech speechId) const;
 	/**
@@ -633,7 +631,7 @@ void ClrPlrPath(Player &player);
 bool PosOkPlayer(const Player &player, Point position);
 void MakePlrPath(Player &player, Point targetPosition, bool endspace);
 void CalcPlrStaff(Player &player);
-void CheckPlrSpell();
+void CheckPlrSpell(bool isShiftHeld);
 void SyncPlrAnim(int pnum);
 void SyncInitPlrPos(int pnum);
 void SyncInitPlr(int pnum);

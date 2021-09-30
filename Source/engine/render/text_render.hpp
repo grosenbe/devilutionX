@@ -24,19 +24,33 @@ enum GameFontTables : uint8_t {
 	GameFont30,
 	GameFont42,
 	GameFont46,
+	FontSizeDialog,
 };
 
 enum text_color : uint8_t {
-	ColorSilver,
+	ColorUiGold,
+	ColorUiSilver,
+	ColorUiGoldDark,
+	ColorUiSilverDark,
+
+	ColorDialogWhite,
+	ColorDialogYellow,
+
 	ColorGold,
+	ColorBlack,
+
+	ColorWhite,
+	ColorWhitegold,
 	ColorRed,
 	ColorBlue,
-	ColorBlack,
+
+	ColorButtonface,
+	ColorButtonpushed,
 };
 
 extern std::optional<CelSprite> pSPentSpn2Cels;
 
-void LoadFont(GameFontTables size, text_color color, const char *translationFile = nullptr);
+void UnloadFonts(GameFontTables size, text_color color);
 
 /**
  * @brief Calculate pixel width of first line of text, respecting kerning
@@ -66,7 +80,7 @@ void WordWrapString(char *text, size_t width, GameFontTables size = GameFont12, 
  * @param spacing Additional space to add between characters.
  *                This value may be adjusted if the flag UIS_FIT_SPACING is passed in the flags parameter.
  * @param lineHeight Allows overriding the default line height, useful for multi-line strings.
- * @return The number of characters rendered, including characters "drawn" outside the buffer.
+ * @return The number of bytes rendered, including characters "drawn" outside the buffer.
  */
 uint32_t DrawString(const Surface &out, string_view text, const Rectangle &rect, UiFlags flags = UiFlags::None, int spacing = 1, int lineHeight = -1);
 

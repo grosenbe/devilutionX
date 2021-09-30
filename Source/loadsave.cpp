@@ -415,8 +415,8 @@ void LoadPlayer(LoadHelper &file, Player &player)
 	player.position.temp.x = file.NextLE<int32_t>();
 	player.position.temp.y = file.NextLE<int32_t>();
 	player.tempDirection = static_cast<Direction>(file.NextLE<int32_t>());
-	player._pVar4 = file.NextLE<int32_t>();
-	player._pVar5 = file.NextLE<int32_t>();
+	player.spellLevel = file.NextLE<int32_t>();
+	file.Skip(4); // skip _pVar5, was used for storing position of a tile which should have its BFLAG_PLAYERLR flag removed after walking
 	player.position.offset2.deltaX = file.NextLE<int32_t>();
 	player.position.offset2.deltaY = file.NextLE<int32_t>();
 	file.Skip(4); // Skip actionFrame
@@ -1090,8 +1090,8 @@ void SavePlayer(SaveHelper &file, const Player &player)
 	file.WriteLE<int32_t>(player.position.temp.x);
 	file.WriteLE<int32_t>(player.position.temp.y);
 	file.WriteLE<int32_t>(static_cast<int32_t>(player.tempDirection));
-	file.WriteLE<int32_t>(player._pVar4);
-	file.WriteLE<int32_t>(player._pVar5);
+	file.WriteLE<int32_t>(player.spellLevel);
+	file.Skip<int32_t>(); // skip _pVar5, was used for storing position of a tile which should have its BFLAG_PLAYERLR flag removed after walking
 	file.WriteLE<int32_t>(player.position.offset2.deltaX);
 	file.WriteLE<int32_t>(player.position.offset2.deltaY);
 	file.Skip<int32_t>(); // Skip _pVar8
@@ -1448,8 +1448,8 @@ void RemoveInvalidItem(Item &item)
 		isInvalid = isInvalid || (item._itype == ItemType::Staff && GetSpellStaffLevel(item._iSpell) == -1);
 		isInvalid = isInvalid || (item._iMiscId == IMISC_BOOK && GetSpellBookLevel(item._iSpell) == -1);
 		isInvalid = isInvalid || item._iDamAcFlags != 0;
-		isInvalid = isInvalid || item._iPrePower > IDI_LASTDIABLO;
-		isInvalid = isInvalid || item._iSufPower > IDI_LASTDIABLO;
+		isInvalid = isInvalid || item._iPrePower > IPL_LASTDIABLO;
+		isInvalid = isInvalid || item._iSufPower > IPL_LASTDIABLO;
 	}
 
 	if (isInvalid) {
@@ -1461,7 +1461,7 @@ _item_indexes RemapItemIdxFromDiablo(_item_indexes i)
 {
 	constexpr auto GetItemIdValue = [](int i) -> int {
 		if (i == IDI_SORCERER) {
-			return 166;
+			return IDI_SORCERER_DIABLO;
 		}
 		if (i >= 156) {
 			i += 5; // Hellfire exclusive items
@@ -1482,7 +1482,7 @@ _item_indexes RemapItemIdxFromDiablo(_item_indexes i)
 _item_indexes RemapItemIdxToDiablo(_item_indexes i)
 {
 	constexpr auto GetItemIdValue = [](int i) -> int {
-		if (i == 166) {
+		if (i == IDI_SORCERER_DIABLO) {
 			return IDI_SORCERER;
 		}
 		if ((i >= 83 && i <= 86) || i == 92 || i >= 161) {
@@ -1772,7 +1772,7 @@ void LoadGame(bool firstflag)
 	}
 	for (int j = 0; j < MAXDUNY; j++) {
 		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
-			dFlags[i][j] = file.NextLE<int8_t>();
+			dFlags[i][j] = file.NextLE<int8_t>() & ~(BFLAG_PLAYERLR | BFLAG_MONSTLR);
 	}
 	for (int j = 0; j < MAXDUNY; j++) {
 		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
@@ -2159,7 +2159,7 @@ void LoadLevel()
 
 	for (int j = 0; j < MAXDUNY; j++) {
 		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
-			dFlags[i][j] = file.NextLE<int8_t>();
+			dFlags[i][j] = file.NextLE<int8_t>() & ~(BFLAG_PLAYERLR | BFLAG_MONSTLR);
 	}
 	for (int j = 0; j < MAXDUNY; j++) {
 		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)

@@ -52,7 +52,10 @@ extern bool spselflag;
 extern Rectangle MainPanel;
 extern Rectangle LeftPanel;
 extern Rectangle RightPanel;
+extern std::optional<OwnedSurface> pBtmBuff;
+extern SDL_Rect PanBtnPos[8];
 
+bool IsChatAvailable();
 /**
  * @brief Check if the UI can cover the game area entierly
  */
@@ -128,6 +131,11 @@ void DrawCtrlBtns(const Surface &out);
 void DoSpeedBook();
 
 /**
+ * Clears panel button flags.
+*/
+void ClearPanBtn();
+
+/**
  * Checks if the mouse cursor is within any of the panel buttons and flag it if so.
  */
 void DoPanBtn();
@@ -168,7 +176,8 @@ bool control_check_talk_btn();
 void control_release_talk_btn();
 void control_type_message();
 void control_reset_talk();
-bool control_talk_last_key(char vkey);
+bool IsTalkActive();
+void control_new_text(string_view text);
 bool control_presskeys(int vkey);
 void DiabloHotkeyMsg(uint32_t dwMsg);
 

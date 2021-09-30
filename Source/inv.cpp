@@ -15,11 +15,13 @@
 #include "engine/render/text_render.hpp"
 #include "engine/size.hpp"
 #include "hwcursor.hpp"
+#include "inv_iterators.hpp"
 #include "minitext.h"
 #include "options.h"
 #include "plrmsg.h"
 #include "stores.h"
 #include "towners.h"
+#include "controls/plrctrls.h"
 #include "utils/language.h"
 #include "utils/sdl_geometry.h"
 #include "utils/stdcompat/optional.hpp"
@@ -492,7 +494,7 @@ void CheckInvPaste(int pnum, Point cursorPosition)
 			}
 		};
 		inv_body_loc slot = iLocToInvLoc(il);
-		NetSendCmdChItem(false, INVLOC_CHEST);
+		NetSendCmdChItem(false, slot);
 		if (player.InvBody[slot].isEmpty())
 			player.InvBody[slot] = player.HoldItem;
 		else
@@ -670,7 +672,7 @@ void CheckInvPaste(int pnum, Point cursorPosition)
 	}
 }
 
-void CheckInvCut(int pnum, Point cursorPosition, bool automaticMove)
+void CheckInvCut(int pnum, Point cursorPosition, bool automaticMove, bool dropItem)
 {
 	auto &player = Players[pnum];
 
@@ -883,6 +885,10 @@ void CheckInvCut(int pnum, Point cursorPosition, bool automaticMove)
 				}
 			}
 		}
+	}
+
+	if (dropItem) {
+		TryDropItem();
 	}
 }
 
@@ -1244,10 +1250,9 @@ void DrawInvBelt(const Surface &out)
 		CelDrawItem(myPlayer.SpdList[i], out, position, cel, celFrame);
 
 		if (AllItemsList[myPlayer.SpdList[i].IDidx].iUsable
-		    && myPlayer.SpdList[i]._iStatFlag
 		    && myPlayer.SpdList[i]._itype != ItemType::Gold) {
 			snprintf(tempstr, sizeof(tempstr) / sizeof(*tempstr), "%i", i + 1);
-			DrawString(out, tempstr, { position - Displacement { 0, 12 }, InventorySlotSizeInPixels }, UiFlags::ColorSilver | UiFlags::AlignRight);
+			DrawString(out, tempstr, { position - Displacement { 0, 12 }, InventorySlotSizeInPixels }, UiFlags::ColorWhite | UiFlags::AlignRight);
 		}
 	}
 }
@@ -1505,20 +1510,20 @@ void inv_update_rem_item(Player &player, BYTE iv)
 	CalcPlrInv(player, player._pmode != PM_DEATH);
 }
 
-void CheckInvItem(bool isShiftHeld)
+void CheckInvItem(bool isShiftHeld, bool isCtrlHeld)
 {
 	if (pcurs >= CURSOR_FIRSTITEM) {
 		CheckInvPaste(MyPlayerId, MousePosition);
 	} else {
-		CheckInvCut(MyPlayerId, MousePosition, isShiftHeld);
+		CheckInvCut(MyPlayerId, MousePosition, isShiftHeld, isCtrlHeld);
 	}
 }
 
-void CheckInvScrn(bool isShiftHeld)
+void CheckInvScrn(bool isShiftHeld, bool isCtrlHeld)
 {
 	if (MousePosition.x > 190 + PANEL_LEFT && MousePosition.x < 437 + PANEL_LEFT
 	    && MousePosition.y > PANEL_TOP && MousePosition.y < 33 + PANEL_TOP) {
-		CheckInvItem(isShiftHeld);
+		CheckInvItem(isShiftHeld, isCtrlHeld);
 	}
 }
 
@@ -1837,7 +1842,7 @@ int8_t CheckInvHLight()
 		return -1;
 
 	int8_t rv = -1;
-	InfoColor = UiFlags::ColorSilver;
+	InfoColor = UiFlags::ColorWhite;
 	Item *pi = nullptr;
 	auto &myPlayer = Players[MyPlayerId];
 
@@ -1932,27 +1937,16 @@ bool UseScroll()
 	if (pcurs != CURSOR_HAND)
 		return false;
 
-	auto &myPlayer = Players[MyPlayerId];
+	Player &myPlayer = Players[MyPlayerId];
+	const spell_id spellId = myPlayer._pRSpell;
 
-	if (leveltype == DTYPE_TOWN && !spelldata[myPlayer._pRSpell].sTownSpell)
+	if (leveltype == DTYPE_TOWN && !spelldata[spellId].sTownSpell)
 		return false;
 
-	for (int i = 0; i < myPlayer._pNumInv; i++) {
-		if (!myPlayer.InvList[i].isEmpty()
-		    && IsAnyOf(myPlayer.InvList[i]._iMiscId, IMISC_SCROLL, IMISC_SCROLLT)
-		    && myPlayer.InvList[i]._iSpell == myPlayer._pRSpell) {
-			return true;
-		}
-	}
-	for (auto &item : myPlayer.SpdList) {
-		if (!item.isEmpty()
-		    && IsAnyOf(item._iMiscId, IMISC_SCROLL, IMISC_SCROLLT)
-		    && item._iSpell == myPlayer._pRSpell) {
-			return true;
-		}
-	}
-
-	return false;
+	const InventoryAndBeltPlayerItemsRange items { myPlayer };
+	return std::any_of(items.begin(), items.end(), [spellId](const Item &item) {
+		return item.IsScrollOf(spellId);
+	});
 }
 
 void UseStaffCharge(Player &player)
@@ -2034,11 +2028,7 @@ bool UseInvItem(int pnum, int cii)
 		dropGoldValue = 0;
 	}
 
-	if (item->_iMiscId == IMISC_SCROLL && currlevel == 0 && !spelldata[item->_iSpell].sTownSpell) {
-		return true;
-	}
-
-	if (item->_iMiscId == IMISC_SCROLLT && currlevel == 0 && !spelldata[item->_iSpell].sTownSpell) {
+	if (item->IsScroll() && currlevel == 0 && !spelldata[item->_iSpell].sTownSpell) {
 		return true;
 	}
 
