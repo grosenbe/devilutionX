@@ -13,7 +13,9 @@
 #include "gendung.h"
 #include "monster.h"
 #include "objdat.h"
+#include "panels/info_box.hpp"
 #include "textdat.h"
+#include "utils/attributes.h"
 #include "utils/stdcompat/optional.hpp"
 
 namespace devilution {
@@ -73,7 +75,7 @@ struct QuestData {
 
 extern bool QuestLogIsOpen;
 extern std::optional<CelSprite> pQLogCel;
-extern Quest Quests[MAXQUESTS];
+extern DVL_API_FOR_TEST Quest Quests[MAXQUESTS];
 extern Point ReturnLvlPosition;
 extern dungeon_type ReturnLevelType;
 extern int ReturnLevel;
@@ -84,7 +86,7 @@ void InitQuests();
  * @brief Deactivates quests from each quest pool at random to provide variety for single player games
  * @param seed The seed used to control which quests are deactivated
  * @param quests The available quest list, this function will make some of them inactive by the time it returns
-*/
+ */
 void InitialiseQuestPools(uint32_t seed, Quest quests[]);
 void CheckQuests();
 bool ForceQuests();

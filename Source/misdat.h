@@ -8,9 +8,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "engine.h"
 #include "effects.h"
+#include "engine.h"
 #include "utils/stdcompat/cstddef.hpp"
+#include "utils/stdcompat/string_view.hpp"
 
 namespace devilution {
 
@@ -96,23 +97,24 @@ typedef enum missile_graphic_id : uint8_t {
  */
 enum class MissileMovementDistrubution {
 	/**
-      * @brief No movement distribution is calculated. Normally this means the missile doesn't move at all.
-      */
+	 * @brief No movement distribution is calculated. Normally this means the missile doesn't move at all.
+	 */
 	Disabled,
 	/**
-      * @brief The missile moves and if it hits a enemey it stops (for example firebolt)
-      */
+	 * @brief The missile moves and if it hits a enemey it stops (for example firebolt)
+	 */
 	Blockable,
 	/**
-      * @brief The missile moves and even it hits a enemy it keeps moving (for example flame wave)
-      */
+	 * @brief The missile moves and even it hits a enemy it keeps moving (for example flame wave)
+	 */
 	Unblockable,
 };
 
 struct Missile;
+struct AddMissileParameter;
 
 struct MissileData {
-	void (*mAddProc)(Missile &, Point, Direction);
+	void (*mAddProc)(Missile &, const AddMissileParameter &);
 	void (*mProc)(Missile &);
 	uint8_t mName;
 	bool mDraw;
@@ -133,7 +135,7 @@ enum class MissileDataFlags {
 };
 
 struct MissileFileData {
-	const char *name;
+	string_view name;
 	uint8_t animName;
 	uint8_t animFAmt;
 	MissileDataFlags flags;
@@ -141,17 +143,28 @@ struct MissileFileData {
 	std::array<uint8_t, 16> animLen = {};
 	int16_t animWidth;
 	int16_t animWidth2;
-	std::array<std::unique_ptr<byte[]>, 16> animData;
+	std::unique_ptr<byte[]> animData;
+	std::array<uint32_t, 16> frameOffsets;
 
-	MissileFileData(const char *name, uint8_t animName, uint8_t animFAmt, MissileDataFlags flags,
+	MissileFileData(string_view name, uint8_t animName, uint8_t animFAmt, MissileDataFlags flags,
 	    std::initializer_list<uint8_t> animDelay, std::initializer_list<uint8_t> animLen,
 	    int16_t animWidth, int16_t animWidth2);
 
 	void LoadGFX();
 
+	[[nodiscard]] const byte *GetFirstFrame() const
+	{
+		return animData.get();
+	}
+
+	[[nodiscard]] const byte *GetFrame(size_t i) const
+	{
+		return &animData[frameOffsets[i]];
+	}
+
 	void FreeGFX()
 	{
-		animData = {};
+		animData = nullptr;
 	}
 };
 

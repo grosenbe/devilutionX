@@ -1,9 +1,10 @@
+#include "platform/vita/keyboard.h"
+
 #include <cstring>
 
 #include <SDL.h>
-#include <psp2/types.h>
 #include <psp2/ime_dialog.h>
-#include "platform/vita/keyboard.h"
+#include <psp2/types.h>
 
 static void utf16_to_utf8(const uint16_t *src, uint8_t *dst)
 {
@@ -89,7 +90,7 @@ static int vita_keyboard_get(const char *guide_text, const char *initial_text, i
 	SceImeDialogParam param;
 	sceImeDialogParamInit(&param);
 
-	param.supportedLanguages = SCE_IME_LANGUAGE_ENGLISH;
+	param.supportedLanguages = 0;
 	param.languagesForced = SCE_FALSE;
 	param.type = SCE_IME_TYPE_DEFAULT;
 	param.option = 0;

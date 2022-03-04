@@ -116,7 +116,9 @@ enum class HeroSpeech {
 	MaybeItsLockedFromTheInside,
 	LooksLikeItsRustedShut,
 	MaybeTheresAnotherWay,
-	LAST = MaybeTheresAnotherWay
+	AuughUh,
+
+	LAST = AuughUh
 };
 
 enum _sfx_id : int16_t {

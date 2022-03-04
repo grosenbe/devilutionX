@@ -13,7 +13,7 @@ namespace devilution {
 inline bool IsHardwareCursorEnabled()
 {
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-	return sgOptions.Graphics.bHardwareCursor;
+	return *sgOptions.Graphics.hardwareCursor && HardwareCursorSupported();
 #else
 	return false;
 #endif
@@ -49,6 +49,11 @@ public:
 	static CursorInfo GameCursor(int gameSpriteId)
 	{
 		return CursorInfo { CursorType::Game, gameSpriteId };
+	}
+
+	static CursorInfo UnknownCursor()
+	{
+		return CursorInfo { CursorType::Unknown };
 	}
 
 	[[nodiscard]] CursorType type() const

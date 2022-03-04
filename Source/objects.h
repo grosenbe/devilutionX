@@ -13,6 +13,7 @@
 #include "monster.h"
 #include "objdat.h"
 #include "textdat.h"
+#include "utils/attributes.h"
 
 namespace devilution {
 
@@ -32,6 +33,7 @@ struct Object {
 	bool _oDelFlag;
 	int8_t _oBreak;
 	bool _oSolidFlag;
+	/** True if the object allows missiles to pass through, false if it collides with missiles */
 	bool _oMissFlag;
 	uint8_t _oSelFlag;
 	bool _oPreFlag;
@@ -56,6 +58,13 @@ struct Object {
 	 */
 	_speech_id bookMessage;
 	int _oVar8;
+
+	/**
+	 * @brief Returns the network identifier for this object
+	 *
+	 * This is currently the index into the Objects array, but may change in the future.
+	 */
+	[[nodiscard]] unsigned int GetId() const;
 
 	/**
 	 * @brief Marks the map region to be refreshed when the player interacts with the object.
@@ -91,7 +100,7 @@ struct Object {
 	 * initialized by IntializeQuestBook().
 	 *
 	 * @param mapRange The region to be updated when this object is activated.
-	*/
+	 */
 	constexpr void InitializeBook(Rectangle mapRange)
 	{
 		SetMapRange(mapRange);
@@ -112,6 +121,16 @@ struct Object {
 	}
 
 	/**
+	 * @brief Initializes this object as some form of door. Futher initialization of other game structures needs to be
+	 * performed separately, refer to the code in objects.cpp.
+	 */
+	constexpr void InitializeDoor()
+	{
+		_oDoorFlag = true;
+		_oVar4 = 0;
+	}
+
+	/**
 	 * @brief Marks an object which was spawned from a sublevel in response to a lever activation.
 	 * @param mapRange The region which was updated to spawn this object.
 	 * @param leverID The id (*not* an object ID/index) of the lever responsible for the map change.
@@ -123,21 +142,139 @@ struct Object {
 	}
 
 	/**
+	 * @brief Check if the object can be broken (is an intact barrel or crux)
+	 * @return True if the object is intact and breakable, false if already broken or not a breakable object.
+	 */
+	[[nodiscard]] constexpr bool IsBreakable() const
+	{
+		return _oBreak == 1;
+	}
+
+	/**
+	 * @brief Check if the object has been broken
+	 * @return True if the object is breakable and has been broken, false if unbroken or not a breakable object.
+	 */
+	[[nodiscard]] constexpr bool IsBroken() const
+	{
+		return _oBreak == -1;
+	}
+
+	/**
+	 * Returns true if the object is a harmful shrine and the player has disabled permanent shrine effects.
+	 */
+	[[nodiscard]] bool IsDisabled() const;
+
+	/**
+	 * @brief Check if this object is barrel (or explosive barrel)
+	 * @return True if the object is one of the barrel types (see _object_id)
+	 */
+	[[nodiscard]] constexpr bool IsBarrel() const
+	{
+		return IsAnyOf(_otype, _object_id::OBJ_BARREL, _object_id::OBJ_BARRELEX);
+	}
+
+	/**
+	 * @brief Check if this object is a chest (or trapped chest).
+	 *
+	 * Trapped chests get their base type change in addition to having the trap flag set, but if they get "refilled" by
+	 * a Thaumaturgic shrine the base type is not reverted. This means you need to consider both the base type and the
+	 * trap flag to differentiate between chests that are currently trapped and chests which have never been trapped.
+	 *
+	 * @return True if the object is any of the chest types (see _object_id)
+	 */
+	[[nodiscard]] constexpr bool IsChest() const
+	{
+		return IsAnyOf(_otype, _object_id::OBJ_CHEST1, _object_id::OBJ_CHEST2, _object_id::OBJ_CHEST3, _object_id::OBJ_TCHEST1, _object_id::OBJ_TCHEST2, _object_id::OBJ_TCHEST3);
+	}
+
+	/**
+	 * @brief Check if this object is a trapped chest (specifically a chest which is currently trapped).
+	 * @return True if the object is one of the trapped chest types (see _object_id) and has an active trap.
+	 */
+	[[nodiscard]] constexpr bool IsTrappedChest() const
+	{
+		return IsAnyOf(_otype, _object_id::OBJ_TCHEST1, _object_id::OBJ_TCHEST2, _object_id::OBJ_TCHEST3) && _oTrapFlag;
+	}
+
+	/**
+	 * @brief Check if this object is an untrapped chest (specifically a chest which has not been trapped).
+	 * @return True if the object is one of the untrapped chest types (see _object_id) and has no active trap.
+	 */
+	[[nodiscard]] constexpr bool IsUntrappedChest() const
+	{
+		return IsAnyOf(_otype, _object_id::OBJ_CHEST1, _object_id::OBJ_CHEST2, _object_id::OBJ_CHEST3) && !_oTrapFlag;
+	}
+
+	/**
+	 * @brief Check if this object is a crucifix
+	 * @return True if the object is one of the crux types (see _object_id)
+	 */
+	[[nodiscard]] constexpr bool IsCrux() const
+	{
+		return IsAnyOf(_otype, _object_id::OBJ_CRUX1, _object_id::OBJ_CRUX2, _object_id::OBJ_CRUX3);
+	}
+
+	/**
 	 * @brief Check if this object is a door
 	 * @return True if the object is one of the door types (see _object_id)
 	 */
-	bool IsDoor() const
+	[[nodiscard]] constexpr bool IsDoor() const
 	{
 		return IsAnyOf(_otype, _object_id::OBJ_L1LDOOR, _object_id::OBJ_L1RDOOR, _object_id::OBJ_L2LDOOR, _object_id::OBJ_L2RDOOR, _object_id::OBJ_L3LDOOR, _object_id::OBJ_L3RDOOR);
 	}
+
+	/**
+	 * @brief Check if this object is a shrine
+	 * @return True if the object is one of the shrine types (see _object_id)
+	 */
+	[[nodiscard]] constexpr bool IsShrine() const
+	{
+		return IsAnyOf(_otype, _object_id::OBJ_SHRINEL, _object_id::OBJ_SHRINER);
+	}
+
+	/**
+	 * @brief Check if this object is a trap source
+	 * @return True if the object is one of the trap types (see _object_id)
+	 */
+	[[nodiscard]] constexpr bool IsTrap() const
+	{
+		return IsAnyOf(_otype, _object_id::OBJ_TRAPL, _object_id::OBJ_TRAPR);
+	}
 };
 
-extern Object Objects[MAXOBJECTS];
+extern DVL_API_FOR_TEST Object Objects[MAXOBJECTS];
 extern int AvailableObjects[MAXOBJECTS];
 extern int ActiveObjects[MAXOBJECTS];
 extern int ActiveObjectCount;
 extern bool ApplyObjectLighting;
 extern bool LoadingMapObjects;
+
+/**
+ * @brief Find an object given a point in map coordinates
+ *
+ * @param position The map coordinate to test
+ * @param considerLargeObjects Default behaviour will return a pointer to a large object that covers this tile, set
+ *                             this param to false if you only want the object whose base position matches this tile
+ * @return A pointer to the object or nullptr if no object exists at this location
+ */
+Object *ObjectAtPosition(Point position, bool considerLargeObjects = true);
+
+/**
+ * @brief Check whether an item occupies this tile position
+ * @param position The map coordinate to test
+ * @return true if the tile is occupied
+ */
+inline bool IsObjectAtPosition(Point position)
+{
+	return ObjectAtPosition(position) != nullptr;
+}
+
+/**
+ * @brief Check whether an item blocking object (solid object or open door) is located at this tile position
+ * @param position The map coordinate to test
+ * @return true if the tile is blocked
+ */
+bool IsItemBlockingObjectAtPosition(Point position);
 
 void InitObjectGFX();
 void FreeObjectGFX();
@@ -151,7 +288,7 @@ void SetMapObjects(const uint16_t *dunData, int startx, int starty);
  * @param objPos tile coordinates
  */
 void AddObject(_object_id objType, Point objPos);
-void Obj_Trap(int i);
+void OperateTrap(Object &trap);
 void ProcessObjects();
 void RedoPlayerVision();
 void MonstCheckDoors(Monster &monster);
@@ -161,25 +298,16 @@ void TryDisarm(int pnum, int i);
 int ItemMiscIdIdx(item_misc_id imiscid);
 void OperateObject(int pnum, int i, bool TeleFlag);
 void SyncOpObject(int pnum, int cmd, int i);
-void BreakObject(int pnum, int oi);
-void SyncBreakObj(int pnum, int oi);
+void BreakObject(int pnum, Object &object);
+void SyncBreakObj(int pnum, Object &object);
 void SyncObjectAnim(Object &object);
-void GetObjectStr(int i);
+/**
+ * @brief Updates the text drawn in the info box to describe the given object
+ * @param object The currently highlighted object
+ */
+void GetObjectStr(const Object &object);
 void OperateNakrulLever();
 void SyncNakrulRoom();
 void AddNakrulLeaver();
-/**
- * @brief Checks whether the player is activating Na-Krul's spell tomes in the correct order
- *
- * Used as part of the final Diablo: Hellfire quest (from the hints provided to the player in the
- * reconstructed note). This function both updates the state of the variable that tracks progress
- * and also determines whether the spawn conditions are met (i.e. all tomes have been triggered
- * in the correct order).
- *
- * @param s the id of the spell tome
- * @return true if the player has activated all three tomes in the correct order, false otherwise
- */
-bool OperateNakrulBook(int s);
-bool objectIsDisabled(int i);
 
 } // namespace devilution

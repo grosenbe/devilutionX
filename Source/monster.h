@@ -5,8 +5,8 @@
  */
 #pragma once
 
-#include <cstdint>
 #include <array>
+#include <cstdint>
 #include <functional>
 
 #include "engine.h"
@@ -15,11 +15,11 @@
 #include "engine/cel_sprite.hpp"
 #include "engine/point.hpp"
 #include "miniwin/miniwin.h"
-#include "utils/stdcompat/optional.hpp"
 #include "monstdat.h"
 #include "sound.h"
 #include "spelldat.h"
 #include "textdat.h"
+#include "utils/stdcompat/optional.hpp"
 
 namespace devilution {
 
@@ -132,7 +132,7 @@ enum class LeaderRelation : uint8_t {
 };
 
 struct AnimStruct {
-	std::unique_ptr<byte[]> CMem;
+	byte *cl2Data;
 	std::array<std::optional<CelSprite>, 8> CelSpritesForDirections;
 
 	inline const std::optional<CelSprite> &GetCelSpritesForDirection(Direction direction) const
@@ -148,6 +148,7 @@ struct CMonster {
 	_monster_id mtype;
 	/** placeflag enum as a flags*/
 	uint8_t mPlaceFlags;
+	std::unique_ptr<byte[]> animData;
 	AnimStruct Anims[6];
 	/**
 	 * @brief Returns AnimStruct for specified graphic
@@ -219,12 +220,13 @@ struct Monster { // note: missing field _mAFNum
 	const char *mName;
 	CMonster *MType;
 	const MonsterData *MData;
+	std::unique_ptr<uint8_t[]> uniqueTRN;
 
 	/**
 	 * @brief Sets the current cell sprite to match the desired direction and animation sequence
 	 * @param graphic Animation sequence of interest
 	 * @param direction Desired direction the monster should be visually facing
-	*/
+	 */
 	void ChangeAnimationData(MonsterGraphic graphic, Direction direction)
 	{
 		auto &animationData = this->MType->GetAnimData(graphic);
@@ -237,7 +239,7 @@ struct Monster { // note: missing field _mAFNum
 	/**
 	 * @brief Sets the current cell sprite to match the desired animation sequence using the direction the monster is currently facing
 	 * @param graphic Animation sequence of interest
-	*/
+	 */
 	void ChangeAnimationData(MonsterGraphic graphic)
 	{
 		this->ChangeAnimationData(graphic, this->_mdir);
@@ -268,10 +270,12 @@ extern int ActiveMonsterCount;
 extern int MonsterKillCounts[MAXMONSTERS];
 extern bool sgbSaveSoundOn;
 
+void PrepareUniqueMonst(Monster &monster, int uniqindex, int miniontype, int bosspacksize, const UniqueMonsterData &uniqueMonsterData);
 void InitLevelMonsters();
 void GetLevelMTypes();
 void InitMonsterGFX(int monst);
 void monster_some_crypt();
+void InitGolems();
 void InitMonsters();
 void SetMapMonsters(const uint16_t *dunData, Point startPosition);
 int AddMonster(Point position, Direction dir, int mtype, bool inMap);
@@ -315,6 +319,6 @@ void SpawnGolem(int i, Point position, Missile &missile);
 bool CanTalkToMonst(const Monster &monster);
 bool CheckMonsterHit(Monster &monster, bool *ret);
 int encode_enemy(Monster &monster);
-void decode_enemy(Monster &monster, int enemy);
+void decode_enemy(Monster &monster, int enemyId);
 
 } // namespace devilution

@@ -1,5 +1,6 @@
 brew "cmake"
 brew "fmt"
-brew "sdl2_ttf"
+brew "sdl2"
 brew "libsodium"
 brew "pkg-config"
+brew "googletest"

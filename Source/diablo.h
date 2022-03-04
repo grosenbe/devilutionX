@@ -7,18 +7,21 @@
 
 #include <cstdint>
 
-#include "utils/endian.hpp"
-
-#include "controls/keymapper.hpp"
 #ifdef _DEBUG
 #include "monstdat.h"
 #endif
 #include "gendung.h"
 #include "init.h"
+#include "utils/attributes.h"
+#include "utils/endian.hpp"
 
 namespace devilution {
 
-#define GAME_ID (gbIsHellfire ? (gbIsSpawn ? LoadBE32("HSHR") : LoadBE32("HRTL")) : (gbIsSpawn ? LoadBE32("DSHR") : LoadBE32("DRTL")))
+constexpr uint32_t GameIdDiabloFull = LoadBE32("DRTL");
+constexpr uint32_t GameIdDiabloSpawn = LoadBE32("DSHR");
+constexpr uint32_t GameIdHellfireFull = LoadBE32("HRTL");
+constexpr uint32_t GameIdHellfireSpawn = LoadBE32("HSHR");
+#define GAME_ID (gbIsHellfire ? (gbIsSpawn ? GameIdHellfireSpawn : GameIdHellfireFull) : (gbIsSpawn ? GameIdDiabloSpawn : GameIdDiabloFull))
 
 #define NUMLEVELS 25
 
@@ -61,21 +64,21 @@ extern dungeon_type gnLevelTypeTbl[NUMLEVELS];
 extern Point MousePosition;
 extern bool gbRunGame;
 extern bool gbRunGameResult;
-extern bool zoomflag;
+extern DVL_API_FOR_TEST bool zoomflag;
 extern bool gbProcessPlayers;
 extern bool gbLoadGame;
 extern bool cineflag;
 extern int force_redraw;
 /* These are defined in fonts.h */
 extern void FontsCleanup();
-extern int PauseMode;
+extern DVL_API_FOR_TEST int PauseMode;
 extern bool gbNestArt;
 extern bool gbBard;
 extern bool gbBarbarian;
 /**
  * @brief Don't show Messageboxes or other user-interaction. Needed for UnitTests.
  */
-extern bool gbQuietMode;
+extern DVL_API_FOR_TEST bool gbQuietMode;
 extern clicktype sgbMouseDown;
 extern uint16_t gnTickDelay;
 extern char gszProductName[64];
@@ -88,6 +91,7 @@ bool StartGame(bool bNewGame, bool bSinglePlayer);
 int DiabloMain(int argc, char **argv);
 bool TryIconCurs();
 void diablo_pause_game();
+bool diablo_is_focused();
 void diablo_focus_pause();
 void diablo_focus_unpause();
 bool PressEscKey();
@@ -102,8 +106,6 @@ void diablo_color_cyc_logic();
 
 /* rdata */
 
-extern Keymapper keymapper;
-extern bool gbForceWindowed;
 #ifdef _DEBUG
 extern bool DebugDisableNetworkTimeout;
 #endif
@@ -122,5 +124,9 @@ extern bool gbFriendlyMode;
  * @brief Specifices what game logic step is currently executed
  */
 extern GameLogicStep gGameLogicStep;
+
+#ifdef __UWP__
+void setOnInitialized(void (*)());
+#endif
 
 } // namespace devilution

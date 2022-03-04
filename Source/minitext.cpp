@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "DiabloUI/ui_flags.hpp"
 #include "control.h"
 #include "dx.h"
 #include "engine.h"
@@ -41,11 +42,10 @@ void LoadText(const char *text)
 {
 	TextLines.clear();
 
-	char tempstr[1536]; // Longest test is about 768 chars * 2 for unicode
+	char tempstr[2560];
 	strcpy(tempstr, text);
 
-	WordWrapString(tempstr, 543, GameFont30);
-	const string_view paragraphs = tempstr;
+	const std::string paragraphs = WordWrapString(tempstr, 543, GameFont30);
 
 	size_t previous = 0;
 	while (true) {
@@ -112,8 +112,8 @@ void DrawQTextContent(const Surface &out)
 			continue;
 		}
 
-		const char *line = TextLines[lineNumber].c_str();
-		if (line[0] == '\0') {
+		const std::string &line = TextLines[lineNumber];
+		if (line.empty()) {
 			continue;
 		}
 

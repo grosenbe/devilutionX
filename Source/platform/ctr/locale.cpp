@@ -2,33 +2,19 @@
 
 #include <3ds.h>
 
+#include "platform/ctr/cfgu_service.hpp"
+
 namespace devilution {
 namespace n3ds {
-
-namespace {
-
-class CFGUService {
-public:
-	CFGUService()
-	{
-		cfguInit();
-	}
-
-	~CFGUService()
-	{
-		cfguExit();
-	}
-};
-
-} // namespace
 
 std::string GetLocale()
 {
 	CFGUService cfguService;
+	if (!cfguService.IsInitialized())
+		return "";
 
 	u8 language;
 	Result res = CFGU_GetSystemLanguage(&language);
-
 	if (!R_SUCCEEDED(res))
 		return "";
 
@@ -48,7 +34,7 @@ std::string GetLocale()
 	case CFG_LANGUAGE_ZH:
 		return "zh_CN";
 	case CFG_LANGUAGE_KO:
-		return "ko_KR";
+		return "ko";
 	case CFG_LANGUAGE_NL:
 		return "nl";
 	case CFG_LANGUAGE_PT:

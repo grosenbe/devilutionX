@@ -36,7 +36,9 @@ TMenuItem sgSingleMenu[] = {
 	{ GMENU_ENABLED, N_("Options"),       &GamemenuOptions    },
 	{ GMENU_ENABLED, N_("New Game"),      &GamemenuNewGame   },
 	{ GMENU_ENABLED, N_("Load Game"),     &gamemenu_load_game  },
+#ifndef NOEXIT
 	{ GMENU_ENABLED, N_("Quit Game"),     &gamemenu_quit_game  },
+#endif
 	{ GMENU_ENABLED, nullptr,              nullptr             }
 	// clang-format on
 };
@@ -47,7 +49,9 @@ TMenuItem sgMultiMenu[] = {
 	{ GMENU_ENABLED, N_("Options"),         &GamemenuOptions      },
 	{ GMENU_ENABLED, N_("New Game"),        &GamemenuNewGame     },
 	{ GMENU_ENABLED, N_("Restart In Town"), &GamemenuRestartTown },
+#ifndef NOEXIT
 	{ GMENU_ENABLED, N_("Quit Game"),       &gamemenu_quit_game    },
+#endif
 	{ GMENU_ENABLED, nullptr,                nullptr               },
 	// clang-format on
 };
@@ -284,17 +288,19 @@ void GamemenuSpeed(bool bActivate)
 		sgGameInitInfo.nTickRate = gmenu_slider_get(&sgOptionsMenu[3], 20, 50);
 	}
 
-	sgOptions.Gameplay.nTickRate = sgGameInitInfo.nTickRate;
+	sgOptions.Gameplay.tickRate.SetValue(sgGameInitInfo.nTickRate);
 	gnTickDelay = 1000 / sgGameInitInfo.nTickRate;
 }
 
 } // namespace
 
+#ifndef NOEXIT
 void gamemenu_quit_game(bool bActivate)
 {
 	GamemenuNewGame(bActivate);
 	gbRunGameResult = false;
 }
+#endif
 
 void gamemenu_load_game(bool /*bActivate*/)
 {
@@ -341,6 +347,7 @@ void gamemenu_save_game(bool /*bActivate*/)
 	NewCursor(CURSOR_HAND);
 	if (CornerStone.activated) {
 		CornerstoneSave();
+		SaveOptions();
 	}
 	interface_msg_pump();
 	SetWindowProc(saveProc);

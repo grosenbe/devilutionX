@@ -17,7 +17,7 @@ namespace devilution {
 #define INV_SLOT_SIZE_PX 28
 #define INV_SLOT_HALF_SIZE_PX (INV_SLOT_SIZE_PX / 2)
 #define INV_ROW_SLOT_SIZE 10
-constexpr Size InventorySlotSizeInPixels { INV_SLOT_SIZE_PX, INV_SLOT_SIZE_PX };
+constexpr Size InventorySlotSizeInPixels { INV_SLOT_SIZE_PX };
 
 enum inv_item : int8_t {
 	// clang-format off
@@ -35,8 +35,10 @@ enum inv_item : int8_t {
 	// clang-format on
 };
 
-// identifiers for each of the inventory squares
-// see https://github.com/sanctuary/graphics/blob/master/inventory.png
+/**
+ * identifiers for each of the inventory squares
+ * @see #InvRect
+ */
 enum inv_xy_slot : uint8_t {
 	// clang-format off
 	SLOTXY_HEAD_FIRST       = 0,
@@ -148,8 +150,8 @@ bool AutoPlaceItemInInventorySlot(Player &player, int slotIndex, const Item &ite
 bool AutoPlaceItemInBelt(Player &player, const Item &item, bool persistItem = false);
 bool GoldAutoPlace(Player &player);
 bool GoldAutoPlaceInInventorySlot(Player &player, int slotIndex);
-void CheckInvSwap(Player &player, BYTE bLoc, int idx, uint16_t wCI, int seed, bool bId, uint32_t dwBuff);
-void inv_update_rem_item(Player &player, BYTE iv);
+void CheckInvSwap(Player &player, inv_body_loc bLoc, int idx, uint16_t wCI, int seed, bool bId, uint32_t dwBuff);
+void inv_update_rem_item(Player &player, inv_body_loc iv);
 void CheckInvItem(bool isShiftHeld = false, bool isCtrlHeld = false);
 
 /**
@@ -157,14 +159,23 @@ void CheckInvItem(bool isShiftHeld = false, bool isCtrlHeld = false);
  */
 void CheckInvScrn(bool isShiftHeld, bool isCtrlHeld);
 void CheckItemStats(Player &player);
-void InvGetItem(int pnum, Item *item, int ii);
+void InvGetItem(int pnum, int ii);
 void AutoGetItem(int pnum, Item *item, int ii);
-int FindGetItem(int idx, uint16_t ci, int iseed);
-void SyncGetItem(Point position, int idx, uint16_t ci, int iseed);
+
+/**
+ * @brief Searches for a dropped item with the same type/createInfo/seed
+ * @param iseed The value used to initialise the RNG when generating the item
+ * @param idx The overarching type of the target item
+ * @param createInfo Flags used to describe the specific subtype of the target item
+ * @return An index into ActiveItems or -1 if no matching item was found
+ */
+int FindGetItem(int32_t iseed, _item_indexes idx, uint16_t ci);
+void SyncGetItem(Point position, int32_t iseed, _item_indexes idx, uint16_t ci);
 bool CanPut(Point position);
 bool TryInvPut();
 int InvPutItem(Player &player, Point position);
 int SyncPutItem(Player &player, Point position, int idx, uint16_t icreateinfo, int iseed, int Id, int dur, int mdur, int ch, int mch, int ivalue, uint32_t ibuff, int toHit, int maxDam, int minStr, int minMag, int minDex, int ac);
+int SyncDropItem(Point position, int idx, uint16_t icreateinfo, int iseed, int id, int dur, int mdur, int ch, int mch, int ivalue, uint32_t ibuff, int toHit, int maxDam, int minStr, int minMag, int minDex, int ac);
 int8_t CheckInvHLight();
 void RemoveScroll(Player &player);
 bool UseScroll();

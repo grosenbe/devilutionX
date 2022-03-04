@@ -1,5 +1,7 @@
 #include "utils/display.h"
 
+#include <algorithm>
+
 #ifdef __vita__
 #include <psp2/power.h>
 #endif
@@ -11,10 +13,14 @@
 #include "DiabloUI/diabloui.h"
 #include "control.h"
 #include "controls/controller.h"
+#ifndef USE_SDL1
 #include "controls/devices/game_controller.h"
+#endif
 #include "controls/devices/joystick.h"
 #include "controls/devices/kbcontroller.h"
 #include "controls/game_controls.h"
+#include "controls/touch/gamepad.h"
+#include "dx.h"
 #include "options.h"
 #include "utils/log.hpp"
 #include "utils/sdl_wrap.h"
@@ -36,6 +42,103 @@ Uint16 gnScreenWidth;
 Uint16 gnScreenHeight;
 Uint16 gnViewportHeight;
 
+Uint16 GetScreenWidth()
+{
+	return gnScreenWidth;
+}
+
+Uint16 GetScreenHeight()
+{
+	return gnScreenHeight;
+}
+
+Uint16 GetViewportHeight()
+{
+	return gnViewportHeight;
+}
+
+namespace {
+
+#ifndef USE_SDL1
+void CalculatePreferredWindowSize(int &width, int &height)
+{
+	SDL_DisplayMode mode;
+	if (SDL_GetDesktopDisplayMode(0, &mode) != 0) {
+		ErrSdl();
+	}
+
+	if (mode.w < mode.h) {
+		std::swap(mode.w, mode.h);
+	}
+
+	if (*sgOptions.Graphics.integerScaling) {
+		int factor = std::min(mode.w / width, mode.h / height);
+		width = mode.w / factor;
+		height = mode.h / factor;
+		return;
+	}
+
+	float wFactor = (float)mode.w / width;
+	float hFactor = (float)mode.h / height;
+
+	if (wFactor > hFactor) {
+		width = mode.w * height / mode.h;
+	} else {
+		height = mode.h * width / mode.w;
+	}
+}
+#endif
+
+void AdjustToScreenGeometry(Size windowSize)
+{
+	gnScreenWidth = windowSize.width;
+	gnScreenHeight = windowSize.height;
+
+	gnViewportHeight = gnScreenHeight;
+	if (gnScreenWidth <= PANEL_WIDTH) {
+		// Part of the screen is fully obscured by the UI
+		gnViewportHeight -= PANEL_HEIGHT;
+	}
+}
+
+Size GetPreferredWindowSize()
+{
+	Size windowSize = *sgOptions.Graphics.resolution;
+
+#ifndef USE_SDL1
+	if (*sgOptions.Graphics.upscale && *sgOptions.Graphics.fitToScreen) {
+		CalculatePreferredWindowSize(windowSize.width, windowSize.height);
+	}
+#endif
+	AdjustToScreenGeometry(windowSize);
+	return windowSize;
+}
+
+} // namespace
+
+float GetDpiScalingFactor()
+{
+#ifdef USE_SDL1
+	return 1.0F;
+#else
+	if (renderer == nullptr)
+		return 1.0F;
+
+	int renderWidth;
+	int renderHeight;
+	SDL_GetRendererOutputSize(renderer, &renderWidth, &renderHeight);
+
+	int windowWidth;
+	int windowHeight;
+	SDL_GetWindowSize(ghMainWnd, &windowWidth, &windowHeight);
+
+	float hfactor = static_cast<float>(renderWidth) / windowWidth;
+	float vhfactor = static_cast<float>(renderHeight) / windowHeight;
+
+	return std::min(hfactor, vhfactor);
+#endif
+}
+
 #ifdef USE_SDL1
 void SetVideoMode(int width, int height, int bpp, uint32_t flags)
 {
@@ -56,7 +159,7 @@ void SetVideoModeToPrimary(bool fullscreen, int width, int height)
 		flags |= SDL_FULLSCREEN;
 #ifdef __3DS__
 	flags &= ~SDL_FULLSCREEN;
-	flags |= Get3DSScalingFlag(sgOptions.Graphics.bFitToScreen, width, height);
+	flags |= Get3DSScalingFlag(*sgOptions.Graphics.fitToScreen, width, height);
 #endif
 	SetVideoMode(width, height, SDL1_VIDEO_MODE_BPP, flags);
 	if (OutputRequiresScaling())
@@ -73,55 +176,6 @@ bool IsFullScreen()
 #endif
 }
 
-void AdjustToScreenGeometry(int width, int height)
-{
-	gnScreenWidth = width;
-	gnScreenHeight = height;
-
-	gnViewportHeight = gnScreenHeight;
-	if (gnScreenWidth <= PANEL_WIDTH) {
-		// Part of the screen is fully obscured by the UI
-		gnViewportHeight -= PANEL_HEIGHT;
-	}
-}
-
-void CalculatePreferdWindowSize(int &width, int &height)
-{
-#ifdef USE_SDL1
-	const SDL_VideoInfo &best = *SDL_GetVideoInfo();
-	Log("Best video mode reported as: {}x{} bpp={} hw_available={}",
-	    best.current_w, best.current_h, best.vfmt->BitsPerPixel, best.hw_available);
-#else
-	SDL_DisplayMode mode;
-	if (SDL_GetDesktopDisplayMode(0, &mode) != 0) {
-		ErrSdl();
-	}
-
-	if (!sgOptions.Graphics.bIntegerScaling) {
-		float wFactor = (float)mode.w / width;
-		float hFactor = (float)mode.h / height;
-
-		if (wFactor > hFactor) {
-			width = mode.w * height / mode.h;
-		} else {
-			height = mode.h * width / mode.w;
-		}
-		return;
-	}
-
-	int wFactor = mode.w / width;
-	int hFactor = mode.h / height;
-
-	if (wFactor > hFactor) {
-		width = mode.w / hFactor;
-		height = mode.h / hFactor;
-	} else {
-		width = mode.w / wFactor;
-		height = mode.h / wFactor;
-	}
-#endif
-}
-
 bool SpawnWindow(const char *lpWindowName)
 {
 #ifdef __vita__
@@ -131,11 +185,11 @@ bool SpawnWindow(const char *lpWindowName)
 #if SDL_VERSION_ATLEAST(2, 0, 6) && defined(__vita__)
 	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
-
-#ifdef _WIN32
-	// The default WASAPI backend causes distortions
-	// https://github.com/diasurgical/devilutionX/issues/1434
-	SDL_setenv("SDL_AUDIODRIVER", "winmm", /*overwrite=*/false);
+#if SDL_VERSION_ATLEAST(2, 0, 10)
+	SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
+#endif
+#if SDL_VERSION_ATLEAST(2, 0, 2)
+	SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
 #endif
 
 	int initFlags = SDL_INIT_VIDEO | SDL_INIT_JOYSTICK;
@@ -170,38 +224,30 @@ bool SpawnWindow(const char *lpWindowName)
 #endif
 #endif
 
-	int width = sgOptions.Graphics.nWidth;
-	int height = sgOptions.Graphics.nHeight;
-
-	if (sgOptions.Graphics.bUpscale && sgOptions.Graphics.bFitToScreen) {
-		CalculatePreferdWindowSize(width, height);
-	}
-	AdjustToScreenGeometry(width, height);
+	Size windowSize = GetPreferredWindowSize();
 
 #ifdef USE_SDL1
 	SDL_WM_SetCaption(lpWindowName, WINDOW_ICON_NAME);
-	SetVideoModeToPrimary(!gbForceWindowed && sgOptions.Graphics.bFullscreen, width, height);
-	if (sgOptions.Gameplay.bGrabInput)
+	SetVideoModeToPrimary(*sgOptions.Graphics.fullscreen, windowSize.width, windowSize.height);
+	if (*sgOptions.Gameplay.grabInput)
 		SDL_WM_GrabInput(SDL_GRAB_ON);
 	atexit(SDL_VideoQuit); // Without this video mode is not restored after fullscreen.
 #else
-	int flags = 0;
-	if (sgOptions.Graphics.bUpscale) {
-		if (!gbForceWindowed && sgOptions.Graphics.bFullscreen) {
+	int flags = SDL_WINDOW_ALLOW_HIGHDPI;
+	if (*sgOptions.Graphics.upscale) {
+		if (*sgOptions.Graphics.fullscreen) {
 			flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 		}
 		flags |= SDL_WINDOW_RESIZABLE;
-
-		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, sgOptions.Graphics.szScaleQuality);
-	} else if (!gbForceWindowed && sgOptions.Graphics.bFullscreen) {
+	} else if (*sgOptions.Graphics.fullscreen) {
 		flags |= SDL_WINDOW_FULLSCREEN;
 	}
 
-	if (sgOptions.Gameplay.bGrabInput) {
+	if (*sgOptions.Gameplay.grabInput) {
 		flags |= SDL_WINDOW_INPUT_GRABBED;
 	}
 
-	ghMainWnd = SDL_CreateWindow(lpWindowName, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, flags);
+	ghMainWnd = SDL_CreateWindow(lpWindowName, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowSize.width, windowSize.height, flags);
 #endif
 	if (ghMainWnd == nullptr) {
 		ErrSdl();
@@ -217,41 +263,153 @@ bool SpawnWindow(const char *lpWindowName)
 #endif
 	refreshDelay = 1000000 / refreshRate;
 
-	if (sgOptions.Graphics.bUpscale) {
-#ifndef USE_SDL1
-		Uint32 rendererFlags = SDL_RENDERER_ACCELERATED;
+	ReinitializeRenderer();
 
-		if (sgOptions.Graphics.bVSync) {
+	return ghMainWnd != nullptr;
+}
+
+#ifndef USE_SDL1
+void ReinitializeTexture()
+{
+	if (texture)
+		texture.reset();
+
+	auto quality = fmt::format("{}", static_cast<int>(*sgOptions.Graphics.scaleQuality));
+	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, quality.c_str());
+
+	texture = SDLWrap::CreateTexture(renderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, gnScreenWidth, gnScreenHeight);
+}
+
+void ReinitializeIntegerScale()
+{
+	if (*sgOptions.Graphics.fitToScreen) {
+		ResizeWindow();
+		return;
+	}
+
+	if (renderer != nullptr && SDL_RenderSetIntegerScale(renderer, *sgOptions.Graphics.integerScaling ? SDL_TRUE : SDL_FALSE) < 0) {
+		ErrSdl();
+	}
+}
+#endif
+
+void ReinitializeRenderer()
+{
+	if (ghMainWnd == nullptr)
+		return;
+
+#ifdef USE_SDL1
+	const SDL_VideoInfo &current = *SDL_GetVideoInfo();
+	Size windowSize = { current.current_w, current.current_h };
+	AdjustToScreenGeometry(windowSize);
+#else
+	if (texture)
+		texture.reset();
+
+	if (renderer != nullptr) {
+		SDL_DestroyRenderer(renderer);
+		renderer = nullptr;
+	}
+
+	if (*sgOptions.Graphics.upscale) {
+		Uint32 rendererFlags = 0;
+
+		if (*sgOptions.Graphics.vSync) {
 			rendererFlags |= SDL_RENDERER_PRESENTVSYNC;
 		}
+
+#ifdef _WIN32
+		// On Windows 11 the directx9 VSYNC timer doesn't get recreated properly, see https://github.com/libsdl-org/SDL/issues/5099
+		// Attempt to use the directx11 driver instead if we have vsync active.
+		const char *const renderHint = SDL_GetHint(SDL_HINT_RENDER_DRIVER);
+		if ((rendererFlags & SDL_RENDERER_PRESENTVSYNC) != 0 && SDL_SetHint(SDL_HINT_RENDER_DRIVER, "direct3d11") != SDL_TRUE) {
+			Log("Error when trying to set hint for direct3d11, using default render driver");
+		}
+#endif
 
 		renderer = SDL_CreateRenderer(ghMainWnd, -1, rendererFlags);
 		if (renderer == nullptr) {
 			ErrSdl();
 		}
 
-		texture = SDLWrap::CreateTexture(renderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, width, height);
-
-		if (sgOptions.Graphics.bIntegerScaling && SDL_RenderSetIntegerScale(renderer, SDL_TRUE) < 0) {
-			ErrSdl();
-		}
-
-		if (SDL_RenderSetLogicalSize(renderer, width, height) <= -1) {
-			ErrSdl();
-		}
+#ifdef _WIN32
+		// Restore any system/user defined hint just in case they turn off upscale/vsync.
+		SDL_SetHint(SDL_HINT_RENDER_DRIVER, renderHint);
 #endif
+
+		ReinitializeTexture();
+
+		if (SDL_RenderSetIntegerScale(renderer, *sgOptions.Graphics.integerScaling ? SDL_TRUE : SDL_FALSE) < 0) {
+			ErrSdl();
+		}
+
+		if (SDL_RenderSetLogicalSize(renderer, gnScreenWidth, gnScreenHeight) <= -1) {
+			ErrSdl();
+		}
+
+		Uint32 format;
+		if (SDL_QueryTexture(texture.get(), &format, nullptr, nullptr, nullptr) < 0)
+			ErrSdl();
+		RendererTextureSurface = SDLWrap::CreateRGBSurfaceWithFormat(0, gnScreenWidth, gnScreenHeight, SDL_BITSPERPIXEL(format), format);
 	} else {
-#ifdef USE_SDL1
-		const SDL_VideoInfo &current = *SDL_GetVideoInfo();
-		width = current.current_w;
-		height = current.current_h;
-#else
-		SDL_GetWindowSize(ghMainWnd, &width, &height);
-#endif
-		AdjustToScreenGeometry(width, height);
+		Size windowSize = {};
+		SDL_GetWindowSize(ghMainWnd, &windowSize.width, &windowSize.height);
+		AdjustToScreenGeometry(windowSize);
 	}
+#endif
+}
 
-	return ghMainWnd != nullptr;
+void SetFullscreenMode()
+{
+#ifdef USE_SDL1
+	Uint32 flags = ghMainWnd->flags ^ SDL_FULLSCREEN;
+	if (*sgOptions.Graphics.fullscreen) {
+		flags |= SDL_FULLSCREEN;
+	}
+	ghMainWnd = SDL_SetVideoMode(0, 0, 0, flags);
+	if (ghMainWnd == NULL) {
+		ErrSdl();
+	}
+#else
+	Uint32 flags = 0;
+	if (*sgOptions.Graphics.fullscreen) {
+		flags = renderer != nullptr ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN;
+	}
+	if (SDL_SetWindowFullscreen(ghMainWnd, flags) != 0) {
+		ErrSdl();
+	}
+	if (renderer != nullptr && !*sgOptions.Graphics.fullscreen) {
+		SDL_RestoreWindow(ghMainWnd); // Avoid window being maximized before resizing
+		Size windowSize = GetPreferredWindowSize();
+		SDL_SetWindowSize(ghMainWnd, windowSize.width, windowSize.height);
+	}
+	InitializeVirtualGamepad();
+#endif
+	force_redraw = 255;
+}
+
+void ResizeWindow()
+{
+	if (ghMainWnd == nullptr)
+		return;
+
+	Size windowSize = GetPreferredWindowSize();
+
+#ifdef USE_SDL1
+	SetVideoModeToPrimary(*sgOptions.Graphics.fullscreen, windowSize.width, windowSize.height);
+#else
+	SDL_SetWindowSize(ghMainWnd, windowSize.width, windowSize.height);
+#endif
+
+	ReinitializeRenderer();
+
+#ifndef USE_SDL1
+	SDL_SetWindowResizable(ghMainWnd, renderer != nullptr ? SDL_TRUE : SDL_FALSE);
+	InitializeVirtualGamepad();
+#endif
+
+	CreateBackBuffer();
+	force_redraw = 255;
 }
 
 SDL_Surface *GetOutputSurface()

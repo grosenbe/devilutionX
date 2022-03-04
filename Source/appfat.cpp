@@ -9,7 +9,8 @@
 #include <fmt/format.h>
 
 #include "diablo.h"
-#include "storm/storm.h"
+#include "multi.h"
+#include "storm/storm_net.hpp"
 #include "utils/language.h"
 #include "utils/sdl_thread.h"
 #include "utils/ui_fwd.h"
@@ -98,13 +99,13 @@ void ErrDlg(const char *title, const char *error, const char *logFilePath, int l
 
 	FreeDlg();
 
-	strncpy(text, fmt::format(_(/* TRANSLATORS: Error message that displays relevant information for bug report */ "{:s}\n\nThe error occurred at: {:s} line {:d}"), error, logFilePath, logLineNr).c_str(), sizeof(text));
+	strcpy(text, fmt::format(_(/* TRANSLATORS: Error message that displays relevant information for bug report */ "{:s}\n\nThe error occurred at: {:s} line {:d}"), error, logFilePath, logLineNr).c_str());
 
 	UiErrorOkDialog(title, text);
 	app_fatal(nullptr);
 }
 
-void InsertCDDlg()
+void InsertCDDlg(const char *archiveName)
 {
 	char text[1024];
 
@@ -112,9 +113,12 @@ void InsertCDDlg()
 	    text,
 	    sizeof(text),
 	    "%s",
-	    _("Unable to open main data archive (diabdat.mpq or spawn.mpq).\n"
-	      "\n"
-	      "Make sure that it is in the game folder."));
+	    fmt::format(
+	        _("Unable to open main data archive ({:s}).\n"
+	          "\n"
+	          "Make sure that it is in the game folder."),
+	        archiveName)
+	        .c_str());
 
 	UiErrorOkDialog(_("Data File Error"), text);
 	app_fatal(nullptr);
@@ -124,7 +128,7 @@ void DirErrorDlg(const char *error)
 {
 	char text[1024];
 
-	strncpy(text, fmt::format(_(/* TRANSLATORS: Error when Program is not allowed to write data */ "Unable to write to location:\n{:s}"), error).c_str(), sizeof(text));
+	strcpy(text, fmt::format(_(/* TRANSLATORS: Error when Program is not allowed to write data */ "Unable to write to location:\n{:s}"), error).c_str());
 
 	UiErrorOkDialog(_("Read-Only Directory Error"), text);
 	app_fatal(nullptr);

@@ -8,6 +8,7 @@
 #include "DiabloUI/diabloui.h"
 #include "DiabloUI/support_lines.h"
 #include "control.h"
+#include "controls/input.h"
 #include "controls/menu_controls.h"
 #include "engine/render/text_render.hpp"
 #include "hwcursor.hpp"
@@ -21,12 +22,7 @@ namespace devilution {
 namespace {
 
 const SDL_Rect VIEWPORT = { 0, 114, 640, 251 };
-const int ShadowOffsetX = 2;
-const int ShadowOffsetY = 2;
 const int LINE_H = 22;
-
-char const *const *Text;
-std::size_t textLines;
 
 // The maximum number of visible lines is the number of whole lines
 // (VIEWPORT.h / LINE_H) rounded up, plus one extra line for when
@@ -36,8 +32,30 @@ std::size_t textLines;
 class CreditsRenderer {
 
 public:
-	CreditsRenderer()
+	CreditsRenderer(char const *const *text, std::size_t textLines)
 	{
+		for (size_t i = 0; i < textLines; i++) {
+			string_view orgText = _(text[i]);
+
+			uint16_t offset = 0;
+			size_t indexFirstNotTab = 0;
+			while (indexFirstNotTab < orgText.size() && orgText[indexFirstNotTab] == '\t') {
+				offset += 40;
+				indexFirstNotTab++;
+			}
+
+			const std::string paragraphs = WordWrapString(orgText.substr(indexFirstNotTab), 580 - offset, FontSizeDialog);
+
+			size_t previous = 0;
+			while (true) {
+				size_t next = paragraphs.find('\n', previous);
+				linesToRender.emplace_back(LineContent { offset, paragraphs.substr(previous, next - previous) });
+				if (next == std::string::npos)
+					break;
+				previous = next + 1;
+			}
+		}
+
 		ticks_begin_ = SDL_GetTicks();
 		prev_offset_y_ = 0;
 		finished_ = false;
@@ -57,6 +75,12 @@ public:
 	}
 
 private:
+	struct LineContent {
+		uint16_t offset;
+		std::string text;
+	};
+
+	std::vector<LineContent> linesToRender;
 	bool finished_;
 	Uint32 ticks_begin_;
 	int prev_offset_y_;
@@ -74,10 +98,10 @@ void CreditsRenderer::Render()
 	DrawArt({ PANEL_LEFT, UI_OFFSET_Y }, &ArtBackground);
 
 	const std::size_t linesBegin = std::max(offsetY / LINE_H, 0);
-	const std::size_t linesEnd = std::min(linesBegin + MAX_VISIBLE_LINES, textLines);
+	const std::size_t linesEnd = std::min(linesBegin + MAX_VISIBLE_LINES, linesToRender.size());
 
 	if (linesBegin >= linesEnd) {
-		if (linesEnd == textLines)
+		if (linesEnd == linesToRender.size())
 			finished_ = true;
 		return;
 	}
@@ -92,25 +116,20 @@ void CreditsRenderer::Render()
 	Sint16 destY = UI_OFFSET_Y + VIEWPORT.y - (offsetY - linesBegin * LINE_H);
 	for (std::size_t i = linesBegin; i < linesEnd; ++i, destY += LINE_H) {
 		Sint16 destX = PANEL_LEFT + VIEWPORT.x + 31;
-		int j = 0;
-		while (Text[i][j] == '\t') {
-			destX += 40;
-			j++;
-		}
 
-		SDL_Rect dstRect { destX, destY, 0, 0 };
+		auto &lineContent = linesToRender[i];
+
+		SDL_Rect dstRect = MakeSdlRect(destX + lineContent.offset, destY, 0, 0);
 		ScaleOutputRect(&dstRect);
-		if (Text[i][j] != '\0') {
-			const Surface &out = Surface(DiabloUiSurface());
-			DrawString(out, _(Text[i]), Point { dstRect.x, dstRect.y }, UiFlags::FontSizeDialog | UiFlags::ColorDialogWhite, 0);
-		}
+		const Surface &out = Surface(DiabloUiSurface());
+		DrawString(out, lineContent.text, Point { dstRect.x, dstRect.y }, UiFlags::FontSizeDialog | UiFlags::ColorDialogWhite);
 	}
 	SDL_SetClipRect(DiabloUiSurface(), nullptr);
 }
 
-bool TextDialog()
+bool TextDialog(char const *const *text, std::size_t textLines)
 {
-	CreditsRenderer creditsRenderer;
+	CreditsRenderer creditsRenderer(text, textLines);
 	bool endMenu = false;
 
 	if (IsHardwareCursor())
@@ -120,10 +139,10 @@ bool TextDialog()
 	do {
 		creditsRenderer.Render();
 		UiFadeIn();
-		while (SDL_PollEvent(&event) != 0) {
+		while (PollEvent(&event) != 0) {
 			switch (event.type) {
 			case SDL_KEYDOWN:
-			case SDL_MOUSEBUTTONDOWN:
+			case SDL_MOUSEBUTTONUP:
 				endMenu = true;
 				break;
 			default:
@@ -147,20 +166,14 @@ bool TextDialog()
 
 bool UiCreditsDialog()
 {
-	Text = CreditLines;
-	textLines = CreditLinesSize;
-
 	LoadArt("ui_art\\creditsw.pcx", &ArtBackgroundWidescreen);
 	LoadBackgroundArt("ui_art\\credits.pcx");
 
-	return TextDialog();
+	return TextDialog(CreditLines, CreditLinesSize);
 }
 
 bool UiSupportDialog()
 {
-	Text = SupportLines;
-	textLines = SupportLinesSize;
-
 	if (gbIsHellfire) {
 		LoadArt("ui_art\\supportw.pcx", &ArtBackgroundWidescreen);
 		LoadBackgroundArt("ui_art\\support.pcx");
@@ -169,7 +182,7 @@ bool UiSupportDialog()
 		LoadBackgroundArt("ui_art\\credits.pcx");
 	}
 
-	return TextDialog();
+	return TextDialog(SupportLines, SupportLinesSize);
 }
 
 } // namespace devilution

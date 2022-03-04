@@ -11,11 +11,11 @@
 #include "diablo.h"
 #include "engine/load_file.hpp"
 #include "engine/random.hpp"
+#include "engine/size.hpp"
 #include "gendung.h"
 #include "player.h"
 #include "quests.h"
 #include "setmaps.h"
-#include "engine/size.hpp"
 
 namespace devilution {
 
@@ -37,7 +37,7 @@ int Room_Min = 4;
 const int DirXadd[5] = { 0, 0, 1, 0, -1 };
 const int DirYadd[5] = { 0, -1, 0, 1, 0 };
 const ShadowStruct SPATSL2[2] = { { 6, 3, 0, 3, 48, 0, 50 }, { 9, 3, 0, 3, 48, 0, 50 } };
-//short word_48489A = 0;
+// short word_48489A = 0;
 
 const BYTE BTYPESL2[161] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 0, 0, 0, 0, 0, 0, 17, 18, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 2, 2, 2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 0, 3, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 const BYTE BSTYPESL2[161] = { 0, 1, 2, 3, 0, 0, 6, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 6, 6, 6, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 2, 2, 2, 0, 0, 0, 1, 1, 1, 1, 6, 2, 2, 2, 0, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 1, 2, 2, 3, 3, 3, 3, 1, 1, 2, 2, 3, 3, 3, 3, 1, 1, 3, 3, 2, 2, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -3145,24 +3145,10 @@ void LoadPreL2Dungeon(const char *path)
 
 void CreateL2Dungeon(uint32_t rseed, lvl_entry entry)
 {
-	if (!gbIsMultiplayer) {
-		if (currlevel == 7 && Quests[Q_BLIND]._qactive == QUEST_NOTAVAIL) {
-			currlevel = 6;
-			CreateL2Dungeon(glSeedTbl[6], ENTRY_LOAD);
-			currlevel = 7;
-		}
-		if (currlevel == 8) {
-			if (Quests[Q_BLIND]._qactive == QUEST_NOTAVAIL) {
-				currlevel = 6;
-				CreateL2Dungeon(glSeedTbl[6], ENTRY_LOAD);
-				currlevel = 8;
-			} else {
-				currlevel = 7;
-				CreateL2Dungeon(glSeedTbl[7], ENTRY_LOAD);
-				currlevel = 8;
-			}
-		}
-	}
+	nSx1 = -1;
+	nSy1 = -1;
+	nSx2 = -1;
+	nSy2 = -1;
 
 	SetRndSeed(rseed);
 

@@ -1,16 +1,18 @@
 #pragma once
 
-#include <string>
-#include <memory>
 #include <array>
+#include <memory>
+#include <string>
+
 #include <asio/ts/buffer.hpp>
 #include <asio/ts/internet.hpp>
 #include <asio/ts/io_context.hpp>
 #include <asio/ts/net.hpp>
 
-#include "dvlnet/packet.h"
 #include "dvlnet/abstract_net.h"
 #include "dvlnet/frame_queue.h"
+#include "dvlnet/packet.h"
+#include "multi.h"
 
 namespace devilution {
 namespace net {
@@ -26,7 +28,7 @@ public:
 class tcp_server {
 public:
 	tcp_server(asio::io_context &ioc, const std::string &bindaddr,
-	    unsigned short port, std::string pw);
+	    unsigned short port, packet_factory &pktfty);
 	std::string LocalhostSelf();
 	void Close();
 	virtual ~tcp_server();
@@ -52,7 +54,7 @@ private:
 	typedef std::shared_ptr<client_connection> scc;
 
 	asio::io_context &ioc;
-	packet_factory pktfty;
+	packet_factory &pktfty;
 	std::unique_ptr<asio::ip::tcp::acceptor> acceptor;
 	std::array<scc, MAX_PLRS> connections;
 	buffer_t game_init_info;
@@ -75,5 +77,5 @@ private:
 	void DropConnection(const scc &con);
 };
 
-} //namespace net
-} //namespace devilution
+} // namespace net
+} // namespace devilution

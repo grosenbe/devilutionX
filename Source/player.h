@@ -20,6 +20,7 @@
 #include "multi.h"
 #include "path.h"
 #include "spelldat.h"
+#include "utils/attributes.h"
 #include "utils/enum_traits.h"
 
 namespace devilution {
@@ -28,7 +29,7 @@ namespace devilution {
 #define NUM_INV_GRID_ELEM 40
 #define MAXBELTITEMS 8
 #define MAXRESIST 75
-#define MAXCHARLEVEL 51
+#define MAXCHARLEVEL 50
 #define MAX_SPELL_LEVEL 15
 #define PLR_NAME_LEN 32
 
@@ -110,9 +111,9 @@ enum class PlayerWeaponGraphic : uint8_t {
 
 enum PLR_MODE : uint8_t {
 	PM_STAND,
-	PM_WALK,  //Movement towards N, NW, or NE
-	PM_WALK2, //Movement towards S, SW, or SE
-	PM_WALK3, //Movement towards W or E
+	PM_WALK,  // Movement towards N, NW, or NE
+	PM_WALK2, // Movement towards S, SW, or SE
+	PM_WALK3, // Movement towards W or E
 	PM_ATTACK,
 	PM_RATTACK,
 	PM_BLOCK,
@@ -146,6 +147,35 @@ enum action_id : int8_t {
 	// clang-format on
 };
 
+/** Maps from armor animation to letter used in graphic files. */
+constexpr std::array<char, 4> ArmourChar = {
+	'L', // light
+	'M', // medium
+	'H', // heavy
+};
+/** Maps from weapon animation to letter used in graphic files. */
+constexpr std::array<char, 9> WepChar = {
+	'N', // unarmed
+	'U', // no weapon + shield
+	'S', // sword + no shield
+	'D', // sword + shield
+	'B', // bow
+	'A', // axe
+	'M', // blunt + no shield
+	'H', // blunt + shield
+	'T', // staff
+};
+
+/** Maps from player class to letter used in graphic files. */
+constexpr std::array<char, 6> CharChar = {
+	'W', // warrior
+	'R', // rogue
+	'S', // sorcerer
+	'M', // monk
+	'B',
+	'C',
+};
+
 /**
  * @brief Contains Data (CelSprites) for a player graphic (player_graphic)
  */
@@ -177,9 +207,9 @@ struct Player {
 	action_id destAction;
 	int destParam1;
 	int destParam2;
-	Direction destParam3;
+	int destParam3;
 	int destParam4;
-	int plrlevel;
+	uint8_t plrlevel;
 	ActorPosition position;
 	Direction _pdir; // Direction faced by player (direction enum)
 	int _pgfxnum;    // Bitmask indicating what variant of the sprite the player is using. Lower byte define weapon (PlayerWeaponGraphic) and higher values define armour (starting with PlayerArmorGraphic)
@@ -187,6 +217,14 @@ struct Player {
 	 * @brief Contains Information for current Animation
 	 */
 	AnimationInfo AnimInfo;
+	/**
+	 * @brief Contains a optional preview CelSprite that is displayed until the current command is handled by the game logic
+	 */
+	CelSprite *pPreviewCelSprite;
+	/**
+	 * @brief Contains the progress to next game tick when pPreviewCelSprite was set
+	 */
+	float progressToNextGameTickWhenPreviewWasSet;
 	int _plid;
 	int _pvid;
 	spell_id _pSpell;
@@ -244,8 +282,6 @@ struct Player {
 	Direction tempDirection;
 	/** Used for spell level */
 	int spellLevel;
-	/** Used for stalling the appearance of the options screen after dying in singleplayer */
-	int deathFrame;
 	bool _pLvlVisited[NUMLEVELS];
 	bool _pSLvlVisited[NUMLEVELS]; // only 10 used
 	/**
@@ -300,6 +336,13 @@ struct Player {
 	uint32_t pDamAcFlags;
 
 	void CalcScrolls();
+
+	bool CanUseItem(const Item &item) const
+	{
+		return _pStrength >= item._iMinStr
+		    && _pMagic >= item._iMinMag
+		    && _pDexterity >= item._iMinDex;
+	}
 
 	bool HasItem(int item, int *idx = nullptr) const;
 
@@ -431,7 +474,7 @@ struct Player {
 	int GetMeleePiercingToHit() const
 	{
 		int hper = GetMeleeToHit();
-		//in hellfire armor piercing ignores % of enemy armor instead, no way to include it here
+		// in hellfire armor piercing ignores % of enemy armor instead, no way to include it here
 		if (!gbIsHellfire)
 			hper += _pIEnAc;
 		return hper;
@@ -453,7 +496,7 @@ struct Player {
 	int GetRangedPiercingToHit() const
 	{
 		int hper = GetRangedToHit();
-		//in hellfire armor piercing ignores % of enemy armor instead, no way to include it here
+		// in hellfire armor piercing ignores % of enemy armor instead, no way to include it here
 		if (!gbIsHellfire)
 			hper += _pIEnAc;
 		return hper;
@@ -485,6 +528,13 @@ struct Player {
 	}
 
 	/**
+	 * @brief Return reciprocal of the factor for calculating damage reduction due to Mana Shield.
+	 *
+	 * Valid only for players with Mana Shield spell level greater than zero.
+	 */
+	int GetManaShieldDamageReduction();
+
+	/**
 	 * @brief Return monster armor value after including player's armor piercing % (hellfire only)
 	 * @param monsterArmor - monster armor before applying % armor pierce
 	 * @param isMelee - indicates if it's melee or ranged combat
@@ -492,15 +542,17 @@ struct Player {
 	int CalculateArmorPierce(int monsterArmor, bool isMelee) const
 	{
 		int tmac = monsterArmor;
-		if (gbIsHellfire && _pIEnAc > 0) {
-			int pIEnAc = _pIEnAc - 1;
-			if (pIEnAc > 0)
-				tmac >>= pIEnAc;
-			else
-				tmac -= tmac / 4;
-		}
-		if (isMelee && _pClass == HeroClass::Barbarian) {
-			tmac -= monsterArmor / 8;
+		if (_pIEnAc > 0) {
+			if (gbIsHellfire) {
+				int pIEnAc = _pIEnAc - 1;
+				if (pIEnAc > 0)
+					tmac >>= pIEnAc;
+				else
+					tmac -= tmac / 4;
+			}
+			if (isMelee && _pClass == HeroClass::Barbarian) {
+				tmac -= monsterArmor / 8;
+			}
 		}
 		if (tmac < 0)
 			tmac = 0;
@@ -514,7 +566,7 @@ struct Player {
 	 * The stored value is unused...
 	 * @see _pHPPer
 	 * @return The players current hit points as a percentage of their maximum (from 0 to 80%)
-	*/
+	 */
 	int UpdateHitPointPercentage()
 	{
 		if (_pMaxHP <= 0) { // divide by zero guard
@@ -540,6 +592,44 @@ struct Player {
 		return _pManaPer;
 	}
 
+	/**
+	 * @brief Restores between 1/8 (inclusive) and 1/4 (exclusive) of the players max HP (further adjusted by class).
+	 *
+	 * This determines a random amount of non-fractional life points to restore then scales the value based on the
+	 *  player class. Warriors/barbarians get between 1/4 and 1/2 life restored per potion, rogue/monk/bard get 3/16
+	 *  to 3/8, and sorcerers get the base amount.
+	 */
+	void RestorePartialLife();
+
+	/**
+	 * @brief Resets hp to maxHp
+	 */
+	void RestoreFullLife()
+	{
+		_pHitPoints = _pMaxHP;
+		_pHPBase = _pMaxHPBase;
+	}
+
+	/**
+	 * @brief Restores between 1/8 (inclusive) and 1/4 (exclusive) of the players max Mana (further adjusted by class).
+	 *
+	 * This determines a random amount of non-fractional mana points to restore then scales the value based on the
+	 *  player class. Sorcerers get between 1/4 and 1/2 mana restored per potion, rogue/monk/bard get 3/16 to 3/8,
+	 *  and warrior/barbarian get the base amount. However if the player can't use magic due to an equipped item then
+	 *  they get nothing.
+	 */
+	void RestorePartialMana();
+
+	/**
+	 * @brief Resets mana to maxMana (if the player can use magic)
+	 */
+	void RestoreFullMana()
+	{
+		if ((_pIFlags & ISPL_NOMANA) == 0) {
+			_pMana = _pMaxMana;
+			_pManaBase = _pMaxManaBase;
+		}
+	}
 	/**
 	 * @brief Sets the readied spell to the spell in the specified equipment slot. Does nothing if the item does not have a valid spell.
 	 * @param bodyLocation - the body location whose item will be checked for the spell.
@@ -576,11 +666,20 @@ struct Player {
 			return true;
 		return false;
 	}
+
+	/**
+	 * @brief Updates pPreviewCelSprite according to new requested command
+	 * @param cmdId What command is requested
+	 * @param point Point for the command
+	 * @param wParam1 First Parameter
+	 * @param wParam2 Second Parameter
+	 */
+	void UpdatePreviewCelSprite(_cmd_id cmdId, Point point, uint16_t wParam1, uint16_t wParam2);
 };
 
-extern int MyPlayerId;
-extern Player *MyPlayer;
-extern Player Players[MAX_PLRS];
+extern DVL_API_FOR_TEST int MyPlayerId;
+extern DVL_API_FOR_TEST Player *MyPlayer;
+extern DVL_API_FOR_TEST Player Players[MAX_PLRS];
 extern bool MyPlayerIsDead;
 extern int BlockBonuses[enum_size<HeroClass>::value];
 
@@ -631,7 +730,7 @@ void ClrPlrPath(Player &player);
 bool PosOkPlayer(const Player &player, Point position);
 void MakePlrPath(Player &player, Point targetPosition, bool endspace);
 void CalcPlrStaff(Player &player);
-void CheckPlrSpell(bool isShiftHeld);
+void CheckPlrSpell(bool isShiftHeld, spell_id spellID = MyPlayer->_pRSpell, spell_type spellType = MyPlayer->_pRSplType);
 void SyncPlrAnim(int pnum);
 void SyncInitPlrPos(int pnum);
 void SyncInitPlr(int pnum);
@@ -658,6 +757,6 @@ extern int StrengthTbl[enum_size<HeroClass>::value];
 extern int MagicTbl[enum_size<HeroClass>::value];
 extern int DexterityTbl[enum_size<HeroClass>::value];
 extern int VitalityTbl[enum_size<HeroClass>::value];
-extern uint32_t ExpLvlsTbl[MAXCHARLEVEL];
+extern uint32_t ExpLvlsTbl[MAXCHARLEVEL + 1];
 
 } // namespace devilution

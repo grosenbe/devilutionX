@@ -8,18 +8,21 @@
 #include <string>
 #include <vector>
 
-#if defined(_WIN64) || defined(_WIN32)
+#if (defined(_WIN64) || defined(_WIN32)) && !defined(__UWP__)
 #include <find_steam_game.h>
 #endif
 
 #include "DiabloUI/diabloui.h"
 #include "dx.h"
+#include "engine/assets.hpp"
+#include "mpq/mpq_reader.hpp"
+#include "options.h"
 #include "pfile.h"
-#include "storm/storm.h"
 #include "utils/language.h"
 #include "utils/log.hpp"
 #include "utils/paths.h"
 #include "utils/ui_fwd.h"
+#include "utils/utf8.hpp"
 
 #ifdef __vita__
 // increase default allowed heap size on Vita
@@ -31,115 +34,56 @@ namespace devilution {
 /** True if the game is the current active window */
 bool gbActive;
 /** A handle to an hellfire.mpq archive. */
-HANDLE hellfire_mpq;
+std::optional<MpqArchive> hellfire_mpq;
 /** The current input handler function */
 WNDPROC CurrentProc;
 /** A handle to the spawn.mpq archive. */
-HANDLE spawn_mpq;
+std::optional<MpqArchive> spawn_mpq;
 /** A handle to the diabdat.mpq archive. */
-HANDLE diabdat_mpq;
-/** A handle to the patch_rt.mpq archive. */
-HANDLE patch_rt_mpq;
+std::optional<MpqArchive> diabdat_mpq;
 /** Indicate if we only have access to demo data */
 bool gbIsSpawn;
 /** Indicate if we have loaded the Hellfire expansion data */
 bool gbIsHellfire;
 /** Indicate if we want vanilla savefiles */
 bool gbVanilla;
-HANDLE hfmonk_mpq;
-HANDLE hfbard_mpq;
-HANDLE hfbarb_mpq;
-HANDLE hfmusic_mpq;
-HANDLE hfvoice_mpq;
-HANDLE hfopt1_mpq;
-HANDLE hfopt2_mpq;
-HANDLE devilutionx_mpq;
+/** Whether the Hellfire mode is required (forced). */
+bool forceHellfire;
+std::optional<MpqArchive> hfmonk_mpq;
+std::optional<MpqArchive> hfbard_mpq;
+std::optional<MpqArchive> hfbarb_mpq;
+std::optional<MpqArchive> hfmusic_mpq;
+std::optional<MpqArchive> hfvoice_mpq;
+std::optional<MpqArchive> devilutionx_mpq;
+std::optional<MpqArchive> lang_mpq;
+std::optional<MpqArchive> font_mpq;
 
 namespace {
 
-HANDLE LoadMPQ(const std::vector<std::string> &paths, const char *mpqName)
+std::optional<MpqArchive> LoadMPQ(const std::vector<std::string> &paths, string_view mpqName)
 {
-	HANDLE archive;
+	std::optional<MpqArchive> archive;
 	std::string mpqAbsPath;
+	std::int32_t error = 0;
 	for (const auto &path : paths) {
-		mpqAbsPath = path + mpqName;
-		if (SFileOpenArchive(mpqAbsPath.c_str(), 0, MPQ_OPEN_READ_ONLY, &archive)) {
+		mpqAbsPath = path + mpqName.data();
+		if ((archive = MpqArchive::Open(mpqAbsPath.c_str(), error))) {
 			LogVerbose("  Found: {} in {}", mpqName, path);
-			SFileSetBasePath(path);
+			paths::SetMpqDir(path);
 			return archive;
 		}
-		if (SErrGetLastError() != STORM_ERROR_FILE_NOT_FOUND) {
-			LogError("Open error {}: {}", SErrGetLastError(), mpqAbsPath);
+		if (error != 0) {
+			LogError("Error {}: {}", MpqArchive::ErrorMessage(error), mpqAbsPath);
 		}
 	}
-	if (SErrGetLastError() == STORM_ERROR_FILE_NOT_FOUND) {
+	if (error == 0) {
 		LogVerbose("Missing: {}", mpqName);
 	}
 
-	return nullptr;
+	return std::nullopt;
 }
 
-} // namespace
-
-void init_cleanup()
-{
-	if (gbIsMultiplayer && gbRunGame) {
-		pfile_write_hero(/*writeGameData=*/false, /*clearTables=*/true);
-	}
-
-	if (spawn_mpq != nullptr) {
-		SFileCloseArchive(spawn_mpq);
-		spawn_mpq = nullptr;
-	}
-	if (diabdat_mpq != nullptr) {
-		SFileCloseArchive(diabdat_mpq);
-		diabdat_mpq = nullptr;
-	}
-	if (patch_rt_mpq != nullptr) {
-		SFileCloseArchive(patch_rt_mpq);
-		patch_rt_mpq = nullptr;
-	}
-	if (hellfire_mpq != nullptr) {
-		SFileCloseArchive(hellfire_mpq);
-		hellfire_mpq = nullptr;
-	}
-	if (hfmonk_mpq != nullptr) {
-		SFileCloseArchive(hfmonk_mpq);
-		hfmonk_mpq = nullptr;
-	}
-	if (hfbard_mpq != nullptr) {
-		SFileCloseArchive(hfbard_mpq);
-		hfbard_mpq = nullptr;
-	}
-	if (hfbarb_mpq != nullptr) {
-		SFileCloseArchive(hfbarb_mpq);
-		hfbarb_mpq = nullptr;
-	}
-	if (hfmusic_mpq != nullptr) {
-		SFileCloseArchive(hfmusic_mpq);
-		hfmusic_mpq = nullptr;
-	}
-	if (hfvoice_mpq != nullptr) {
-		SFileCloseArchive(hfvoice_mpq);
-		hfvoice_mpq = nullptr;
-	}
-	if (hfopt1_mpq != nullptr) {
-		SFileCloseArchive(hfopt1_mpq);
-		hfopt1_mpq = nullptr;
-	}
-	if (hfopt2_mpq != nullptr) {
-		SFileCloseArchive(hfopt2_mpq);
-		hfopt2_mpq = nullptr;
-	}
-	if (devilutionx_mpq != nullptr) {
-		SFileCloseArchive(devilutionx_mpq);
-		devilutionx_mpq = nullptr;
-	}
-
-	NetClose();
-}
-
-void init_archives()
+std::vector<std::string> GetMPQSearchPaths()
 {
 	std::vector<std::string> paths;
 	paths.push_back(paths::BasePath());
@@ -152,7 +96,7 @@ void init_archives()
 	paths.emplace_back("/usr/local/share/diasurgical/devilutionx/");
 #elif defined(__3DS__)
 	paths.emplace_back("romfs:/");
-#elif defined(_WIN64) || defined(_WIN32)
+#elif (defined(_WIN64) || defined(_WIN32)) && !defined(__UWP__)
 	char gogpath[_FSG_PATH_MAX];
 	fsg_get_gog_game_path(gogpath, "1412601690");
 	if (strlen(gogpath) > 0) {
@@ -164,6 +108,9 @@ void init_archives()
 	paths.emplace_back(""); // PWD
 
 	if (SDL_LOG_PRIORITY_VERBOSE >= SDL_LogGetPriority(SDL_LOG_CATEGORY_APPLICATION)) {
+		LogVerbose("Paths:\n    base: {}\n    pref: {}\n  config: {}\n  assets: {}",
+		    paths::BasePath(), paths::PrefPath(), paths::ConfigPath(), paths::AssetsPath());
+
 		std::string message;
 		for (std::size_t i = 0; i < paths.size(); ++i) {
 			char prefix[32];
@@ -175,47 +122,99 @@ void init_archives()
 		LogVerbose("MPQ search paths:{}", message);
 	}
 
+	return paths;
+}
+
+} // namespace
+
+void init_cleanup()
+{
+	if (gbIsMultiplayer && gbRunGame) {
+		pfile_write_hero(/*writeGameData=*/false, /*clearTables=*/true);
+	}
+
+	spawn_mpq = std::nullopt;
+	diabdat_mpq = std::nullopt;
+	hellfire_mpq = std::nullopt;
+	hfmonk_mpq = std::nullopt;
+	hfbard_mpq = std::nullopt;
+	hfbarb_mpq = std::nullopt;
+	hfmusic_mpq = std::nullopt;
+	hfvoice_mpq = std::nullopt;
+	lang_mpq = std::nullopt;
+	font_mpq = std::nullopt;
+	devilutionx_mpq = std::nullopt;
+
+	NetClose();
+}
+
+void LoadCoreArchives()
+{
+	auto paths = GetMPQSearchPaths();
+
+#if !defined(__ANDROID__) && !defined(__APPLE__)
+	// Load devilutionx.mpq first to get the font file for error messages
+	devilutionx_mpq = LoadMPQ(paths, "devilutionx.mpq");
+#endif
+	font_mpq = LoadMPQ(paths, "fonts.mpq"); // Extra fonts
+}
+
+void LoadLanguageArchive()
+{
+	lang_mpq = std::nullopt;
+
+	string_view code = *sgOptions.Language.code;
+	if (code != "en") {
+		std::string langMpqName { code };
+		langMpqName.append(".mpq");
+
+		auto paths = GetMPQSearchPaths();
+		lang_mpq = LoadMPQ(paths, langMpqName);
+	}
+}
+
+void LoadGameArchives()
+{
+	auto paths = GetMPQSearchPaths();
+
 	diabdat_mpq = LoadMPQ(paths, "DIABDAT.MPQ");
-	if (diabdat_mpq == nullptr) {
+	if (!diabdat_mpq) {
 		// DIABDAT.MPQ is uppercase on the original CD and the GOG version.
 		diabdat_mpq = LoadMPQ(paths, "diabdat.mpq");
 	}
 
-	if (diabdat_mpq == nullptr) {
+	if (!diabdat_mpq) {
 		spawn_mpq = LoadMPQ(paths, "spawn.mpq");
-		if (spawn_mpq != nullptr)
+		if (spawn_mpq)
 			gbIsSpawn = true;
 	}
-	HANDLE fh = nullptr;
-	if (!SFileOpenFile("ui_art\\title.pcx", &fh))
-		InsertCDDlg();
-	SFileCloseFileThreadSafe(fh);
-
-	patch_rt_mpq = LoadMPQ(paths, "patch_rt.mpq");
-	if (patch_rt_mpq == nullptr)
-		patch_rt_mpq = LoadMPQ(paths, "patch_sh.mpq");
+	SDL_RWops *handle = OpenAsset("ui_art\\title.pcx");
+	if (handle == nullptr) {
+		LogError("{}", SDL_GetError());
+		InsertCDDlg(_("diabdat.mpq or spawn.mpq"));
+	}
+	SDL_RWclose(handle);
 
 	hellfire_mpq = LoadMPQ(paths, "hellfire.mpq");
-	if (hellfire_mpq != nullptr)
+	if (hellfire_mpq)
 		gbIsHellfire = true;
+	if (forceHellfire && !hellfire_mpq)
+		InsertCDDlg("hellfire.mpq");
+
 	hfmonk_mpq = LoadMPQ(paths, "hfmonk.mpq");
 	hfbard_mpq = LoadMPQ(paths, "hfbard.mpq");
-	if (hfbard_mpq != nullptr)
+	if (hfbard_mpq)
 		gbBard = true;
 	hfbarb_mpq = LoadMPQ(paths, "hfbarb.mpq");
-	if (hfbarb_mpq != nullptr)
+	if (hfbarb_mpq)
 		gbBarbarian = true;
 	hfmusic_mpq = LoadMPQ(paths, "hfmusic.mpq");
 	hfvoice_mpq = LoadMPQ(paths, "hfvoice.mpq");
-	hfopt1_mpq = LoadMPQ(paths, "hfopt1.mpq");
-	hfopt2_mpq = LoadMPQ(paths, "hfopt2.mpq");
 
-	if (gbIsHellfire && (hfmonk_mpq == nullptr || hfmusic_mpq == nullptr || hfvoice_mpq == nullptr)) {
+	if (gbIsHellfire && (!hfmonk_mpq || !hfmusic_mpq || !hfvoice_mpq)) {
 		UiErrorOkDialog(_("Some Hellfire MPQs are missing"), _("Not all Hellfire MPQs were found.\nPlease copy all the hf*.mpq files."));
 		app_fatal(nullptr);
 	}
-
-	devilutionx_mpq = LoadMPQ(paths, "devilutionx.mpq");
 }
 
 void init_create_window()

@@ -1,8 +1,8 @@
 /**
-* @file xpbar.cpp
-*
-* Adds XP bar QoL feature
-*/
+ * @file xpbar.cpp
+ *
+ * Adds XP bar QoL feature
+ */
 #include "xpbar.h"
 
 #include <array>
@@ -49,7 +49,7 @@ void DrawEndCap(const Surface &out, Point point, int idx, const ColorGradient &g
 
 void InitXPBar()
 {
-	if (sgOptions.Gameplay.bExperienceBar) {
+	if (*sgOptions.Gameplay.experienceBar) {
 		LoadMaskedArt("data\\xpbar.pcx", &xpbarArt, 1, 1);
 
 		if (xpbarArt.surface == nullptr) {
@@ -67,7 +67,7 @@ void FreeXPBar()
 
 void DrawXPBar(const Surface &out)
 {
-	if (!sgOptions.Gameplay.bExperienceBar || talkflag)
+	if (!*sgOptions.Gameplay.experienceBar || talkflag)
 		return;
 
 	const auto &player = Players[MyPlayerId];
@@ -79,7 +79,7 @@ void DrawXPBar(const Surface &out)
 
 	const int8_t charLevel = player._pLevel;
 
-	if (charLevel == MAXCHARLEVEL - 1) {
+	if (charLevel == MAXCHARLEVEL) {
 		// Draw a nice golden bar for max level characters.
 		DrawBar(out, position, BarWidth, GoldGradient);
 
@@ -109,7 +109,7 @@ void DrawXPBar(const Surface &out)
 
 bool CheckXPBarInfo()
 {
-	if (!sgOptions.Gameplay.bExperienceBar)
+	if (!*sgOptions.Gameplay.experienceBar)
 		return false;
 
 	const int backX = PANEL_LEFT + PANEL_WIDTH / 2 - 155;
@@ -125,7 +125,7 @@ bool CheckXPBarInfo()
 	strcpy(tempstr, fmt::format(_("Level {:d}"), charLevel).c_str());
 	AddPanelString(tempstr);
 
-	if (charLevel == MAXCHARLEVEL - 1) {
+	if (charLevel == MAXCHARLEVEL) {
 		// Show a maximum level indicator for max level players.
 		InfoColor = UiFlags::ColorWhitegold;
 

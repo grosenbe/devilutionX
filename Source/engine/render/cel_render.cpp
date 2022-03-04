@@ -10,6 +10,7 @@
 
 #include "engine/cel_header.hpp"
 #include "engine/render/common_impl.h"
+#include "engine/trn.hpp"
 #include "options.h"
 #include "palette.h"
 #include "scrollrt.h"
@@ -538,32 +539,6 @@ void CelBlitSafeTo(const Surface &out, Point position, const byte *pRLEBytes, in
 }
 
 /**
- * @brief Same as CelBlitLightSafeTo but with stippled transparency applied
- * @param out Target buffer
- * @param position Target buffer coordinate
- * @param pRLEBytes CEL pixel stream (run-length encoded)
- * @param nDataSize Size of CEL in bytes
- */
-void CelBlitLightTransSafeTo(const Surface &out, Point position, const byte *pRLEBytes, int nDataSize, int nWidth)
-{
-	assert(pRLEBytes != nullptr);
-	const std::uint8_t *tbl = &LightTables[LightTableIndex * 256];
-	bool shift = (reinterpret_cast<uintptr_t>(&out[position]) % 2 == 1);
-	const bool pitchIsEven = (out.pitch() % 2 == 0);
-	RenderCel(
-	    out, position, pRLEBytes, nDataSize, nWidth,
-	    [tbl, &shift](std::uint8_t *dst, const std::uint8_t *src, std::size_t width) {
-		    if (reinterpret_cast<uintptr_t>(dst) % 2 == (shift ? 1 : 0)) {
-			    ++dst, ++src, --width;
-		    }
-		    for (const auto *dstEnd = dst + width; dst < dstEnd; dst += 2, src += 2) {
-			    *dst = tbl[*src];
-		    }
-	    },
-	    [pitchIsEven, &shift]() { if (pitchIsEven) shift = !shift; });
-}
-
-/**
  * @brief Same as CelBlitLightSafe, with blended transparency applied
  * @param out The output buffer
  * @param pRLEBytes CEL pixel stream (run-length encoded)
@@ -646,7 +621,7 @@ void CelDrawLightRedTo(const Surface &out, Point position, const CelSprite &cel,
 {
 	int nDataSize;
 	const auto *pRLEBytes = CelGetFrameClipped(cel.Data(), frame, &nDataSize);
-	RenderCelWithLightTable(out, position, pRLEBytes, nDataSize, cel.Width(frame), GetLightTable(1));
+	RenderCelWithLightTable(out, position, pRLEBytes, nDataSize, cel.Width(frame), GetInfravisionTRN());
 }
 
 void CelDrawItem(const Item &item, const Surface &out, Point position, const CelSprite &cel, int frame)
@@ -665,10 +640,7 @@ void CelClippedBlitLightTransTo(const Surface &out, Point position, const CelSpr
 	const byte *pRLEBytes = CelGetFrameClipped(cel.Data(), frame, &nDataSize);
 
 	if (cel_transparency_active) {
-		if (sgOptions.Graphics.bBlendedTransparancy)
-			CelBlitLightBlendedSafeTo(out, position, pRLEBytes, nDataSize, cel.Width(frame), nullptr);
-		else
-			CelBlitLightTransSafeTo(out, position, pRLEBytes, nDataSize, cel.Width(frame));
+		CelBlitLightBlendedSafeTo(out, position, pRLEBytes, nDataSize, cel.Width(frame), nullptr);
 	} else if (LightTableIndex != 0)
 		CelBlitLightSafeTo(out, position, pRLEBytes, nDataSize, cel.Width(frame), nullptr);
 	else
@@ -701,47 +673,22 @@ std::pair<int, int> MeasureSolidHorizontalBounds(const CelSprite &cel, int frame
 
 	int xBegin = celWidth;
 	int xEnd = 0;
-
-	int transparentRun = 0;
-	int xCur = 0;
-	bool firstTransparentRun = true;
 	while (src < end) {
-		std::int_fast16_t remainingWidth = celWidth;
-		while (remainingWidth > 0) {
+		int xCur = 0;
+		while (xCur < celWidth) {
 			const auto val = static_cast<std::uint8_t>(*src++);
 			if (IsCelTransparent(val)) {
 				const int width = GetCelTransparentWidth(val);
-				transparentRun += width;
 				xCur += width;
-				remainingWidth -= width;
-				if (remainingWidth == 0) {
-					xEnd = std::max(xEnd, celWidth - transparentRun);
-					xCur = 0;
-					firstTransparentRun = true;
-					transparentRun = 0;
-				}
 			} else {
-				if (firstTransparentRun) {
-					xBegin = std::min(xBegin, transparentRun);
-					firstTransparentRun = false;
-					if (xBegin == 0 && xEnd == celWidth) {
-						return { xBegin, xEnd };
-					}
-				}
-				transparentRun = 0;
+				xBegin = std::min(xBegin, xCur);
 				xCur += val;
+				xEnd = std::max(xEnd, xCur);
 				src += val;
-				remainingWidth -= val;
-				if (remainingWidth == 0) {
-					xEnd = celWidth;
-					if (xBegin == 0) {
-						return { xBegin, xEnd };
-					}
-					xCur = 0;
-					firstTransparentRun = true;
-				}
 			}
 		}
+		if (xBegin == 0 && xEnd == celWidth)
+			break;
 	}
 	return { xBegin, xEnd };
 }

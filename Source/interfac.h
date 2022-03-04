@@ -11,7 +11,11 @@
 
 namespace devilution {
 
-#define UI_OFFSET_Y ((Sint16)((gnScreenHeight - 480) / 2))
+inline Sint16 GetUIOffsetY()
+{
+	return ((Sint16)((GetScreenHeight() - 480) / 2));
+}
+#define UI_OFFSET_Y (GetUIOffsetY())
 
 enum interface_mode : uint16_t {
 	// clang-format off
@@ -24,8 +28,11 @@ enum interface_mode : uint16_t {
 	WM_DIABTWARPUP  = 0x408,
 	WM_DIABRETOWN   = 0x409,
 	WM_DIABNEWGAME  = 0x40A,
-	WM_DIABLOADGAME = 0x40B
+	WM_DIABLOADGAME = 0x40B,
 	// clang-format on
+
+	WM_FIRST = WM_DIABNEXTLVL,
+	WM_LAST = WM_DIABLOADGAME,
 };
 
 enum Cutscenes : uint8_t {

@@ -7,9 +7,9 @@
 
 #include <cstdint>
 
-#include "player.h"
 #include "inv.h"
 #include "items.h"
+#include "player.h"
 
 namespace devilution {
 
@@ -39,7 +39,7 @@ struct PlayerPack {
 	uint8_t targx;
 	uint8_t targy;
 	char pName[PLR_NAME_LEN];
-	int8_t pClass;
+	uint8_t pClass;
 	uint8_t pBaseStr;
 	uint8_t pBaseMag;
 	uint8_t pBaseDex;
@@ -74,23 +74,28 @@ struct PlayerPack {
 	int16_t wReserved8;  // For future use
 	uint32_t pDiabloKillLevel;
 	uint32_t pDifficulty;
-	int32_t pDamAcFlags;
+	uint32_t pDamAcFlags;
 	int32_t dwReserved[5]; // For future use
 };
 #pragma pack(pop)
 
-void PackPlayer(PlayerPack *pPack, const Player &player, bool manashield);
-void UnPackPlayer(const PlayerPack *pPack, Player &player, bool netSync);
-void PackItem(ItemPack *id, const Item *is);
+void PackPlayer(PlayerPack *pPack, const Player &player, bool manashield, bool netSync);
+bool UnPackPlayer(const PlayerPack *pPack, Player &player, bool netSync);
+
+/**
+ * @brief Save the attributes needed to recreate this item into an ItemPack struct
+ *
+ * @param packedItem The destination packed struct
+ * @param item The source item
+ */
+void PackItem(ItemPack &packedItem, const Item &item, bool isHellfire);
 
 /**
  * Expand a ItemPack in to a Item
  *
- * Note: last slot of item[MAXITEMS+1] used as temporary buffer
- * find real name reference below, possibly [sizeof(item[])/sizeof(Item)]
- * @param is The source packed item
- * @param id The destination item
+ * @param packedItem The source packed item
+ * @param item The destination item
  */
-void UnPackItem(const ItemPack *is, Item *id, bool isHellfire);
+void UnPackItem(const ItemPack &packedItem, Item &item, bool isHellfire);
 
 } // namespace devilution

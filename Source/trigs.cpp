@@ -8,6 +8,7 @@
 #include <fmt/format.h>
 
 #include "control.h"
+#include "controls/plrctrls.h"
 #include "cursor.h"
 #include "error.h"
 #include "init.h"
@@ -41,7 +42,7 @@ int L3UpList[] = { 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 1
 /** Specifies the dungeon piece IDs which constitute stairways leading down from the caves. */
 int L3DownList[] = { 162, 163, 164, 165, 166, 167, 168, 169, -1 };
 /** Specifies the dungeon piece IDs which constitute stairways leading up to town from the caves. */
-int L3TWarpUpList[] = { 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, -1 };
+int L3TWarpUpList[] = { 182, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, -1 };
 /** Specifies the dungeon piece IDs which constitute stairways leading up from hell. */
 int L4UpList[] = { 82, 83, 90, -1 };
 /** Specifies the dungeon piece IDs which constitute stairways leading down from hell. */
@@ -539,8 +540,12 @@ bool ForceL3Trig()
 				strcpy(infostr, fmt::format(_("Up to level {:d}"), currlevel - 1).c_str());
 				for (int j = 0; j < numtrigs; j++) {
 					if (trigs[j]._tmsg == WM_DIABPREVLVL) {
-						cursPosition = trigs[j].position;
-						return true;
+						int dx = abs(trigs[j].position.x - cursPosition.x);
+						int dy = abs(trigs[j].position.y - cursPosition.y);
+						if (dx < 4 && dy < 4) {
+							cursPosition = trigs[j].position;
+							return true;
+						}
 					}
 				}
 			}
@@ -693,7 +698,7 @@ void Freeupstairs()
 
 		for (int yy = -2; yy <= 2; yy++) {
 			for (int xx = -2; xx <= 2; xx++) {
-				dFlags[tx + xx][ty + yy] |= BFLAG_POPULATED;
+				dFlags[tx + xx][ty + yy] |= DungeonFlag::Populated;
 			}
 		}
 	}
@@ -745,7 +750,7 @@ void CheckTrigForce()
 {
 	trigflag = false;
 
-	if (!sgbControllerActive && MousePosition.y > PANEL_TOP - 1) {
+	if (ControlMode == ControlTypes::KeyboardAndMouse && GetMainPanel().Contains(MousePosition)) {
 		return;
 	}
 

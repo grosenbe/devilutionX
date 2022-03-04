@@ -3,10 +3,13 @@
 #include <cmath>
 
 #include "controls/controller.h"
+#ifndef USE_SDL1
 #include "controls/devices/game_controller.h"
+#endif
 #include "controls/devices/joystick.h"
 #include "controls/devices/kbcontroller.h"
 #include "controls/game_controls.h"
+#include "controls/plrctrls.h"
 #include "controls/touch/gamepad.h"
 #include "options.h"
 
@@ -16,9 +19,9 @@ namespace {
 
 void ScaleJoystickAxes(float *x, float *y, float deadzone)
 {
-	//radial and scaled dead_zone
-	//http://www.third-helix.com/2013/04/12/doing-thumbstick-dead-zones-right.html
-	//input values go from -32767.0...+32767.0, output values are from -1.0 to 1.0;
+	// radial and scaled dead_zone
+	// https://web.archive.org/web/20200130014626/www.third-helix.com:80/2013/04/12/doing-thumbstick-dead-zones-right.html
+	// input values go from -32767.0...+32767.0, output values are from -1.0 to 1.0;
 
 	if (deadzone == 0) {
 		return;
@@ -160,11 +163,13 @@ AxisDirection GetLeftStickOrDpadDirection(bool allowDpad)
 	bool isLeftPressed = stickX <= -0.5 || (allowDpad && IsControllerButtonPressed(ControllerButton_BUTTON_DPAD_LEFT));
 	bool isRightPressed = stickX >= 0.5 || (allowDpad && IsControllerButtonPressed(ControllerButton_BUTTON_DPAD_RIGHT));
 
-#if defined(VIRTUAL_GAMEPAD) && !defined(USE_SDL1)
-	isUpPressed |= VirtualGamepadState.directionPad.isUpPressed;
-	isDownPressed |= VirtualGamepadState.directionPad.isDownPressed;
-	isLeftPressed |= VirtualGamepadState.directionPad.isLeftPressed;
-	isRightPressed |= VirtualGamepadState.directionPad.isRightPressed;
+#ifndef USE_SDL1
+	if (ControlMode == ControlTypes::VirtualGamepad) {
+		isUpPressed |= VirtualGamepadState.isActive && VirtualGamepadState.directionPad.isUpPressed;
+		isDownPressed |= VirtualGamepadState.isActive && VirtualGamepadState.directionPad.isDownPressed;
+		isLeftPressed |= VirtualGamepadState.isActive && VirtualGamepadState.directionPad.isLeftPressed;
+		isRightPressed |= VirtualGamepadState.isActive && VirtualGamepadState.directionPad.isRightPressed;
+	}
 #endif
 
 	if (isUpPressed) {

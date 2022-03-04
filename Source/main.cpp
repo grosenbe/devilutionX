@@ -1,10 +1,16 @@
 #include <SDL.h>
+#include <SDL_main.h>
+
 #ifdef __SWITCH__
 #include "platform/switch/network.h"
 #include "platform/switch/random.hpp"
 #endif
 #ifdef __3DS__
 #include "platform/ctr/system.h"
+#endif
+#ifdef __vita__
+#include "platform/vita/network.h"
+#include "platform/vita/random.hpp"
 #endif
 #ifdef GPERF_HEAP_MAIN
 #include <gperftools/heap-profiler.h>
@@ -19,11 +25,7 @@ extern "C" const char *__asan_default_options() // NOLINT(bugprone-reserved-iden
 }
 #endif
 
-#ifdef __ANDROID__
-int SDL_main(int argc, char **argv)
-#else
-int main(int argc, char **argv)
-#endif
+extern "C" int main(int argc, char **argv)
 {
 #ifdef __SWITCH__
 	switch_enable_network();
@@ -31,6 +33,10 @@ int main(int argc, char **argv)
 #endif
 #ifdef __3DS__
 	ctr_sys_init();
+#endif
+#ifdef __vita__
+	vita_enable_network();
+	randombytes_vitarandom_init();
 #endif
 #ifdef GPERF_HEAP_MAIN
 	HeapProfilerStart("main");

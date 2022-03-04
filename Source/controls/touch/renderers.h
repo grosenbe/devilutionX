@@ -1,12 +1,14 @@
 #pragma once
 
-#if defined(VIRTUAL_GAMEPAD) && !defined(USE_SDL1)
+#include <SDL.h>
 
+#include "DiabloUI/art.h"
 #include "controls/plrctrls.h"
 #include "controls/touch/gamepad.h"
 #include "engine/surface.hpp"
 #include "utils/png.h"
 #include "utils/sdl_ptrs.h"
+#include "utils/stdcompat/optional.hpp"
 
 namespace devilution {
 
@@ -25,6 +27,18 @@ enum VirtualGamepadButtonType {
 	GAMEPAD_BACKDOWN,
 	GAMEPAD_BLANK,
 	GAMEPAD_BLANKDOWN,
+	GAMEPAD_APPLY,
+	GAMEPAD_APPLYDOWN,
+	GAMEPAD_EQUIP,
+	GAMEPAD_EQUIPDOWN,
+	GAMEPAD_DROP,
+	GAMEPAD_DROPDOWN,
+	GAMEPAD_STAIRS,
+	GAMEPAD_STAIRSDOWN,
+	GAMEPAD_STAND,
+	GAMEPAD_STANDDOWN,
+	GAMEPAD_POTION,
+	GAMEPAD_POTIONDOWN,
 };
 
 enum VirtualGamepadPotionType {
@@ -38,6 +52,23 @@ enum VirtualGamepadPotionType {
 };
 
 typedef std::function<void(Art &art, SDL_Rect *src, SDL_Rect *dst)> RenderFunction;
+
+class VirtualMenuPanelRenderer {
+public:
+	VirtualMenuPanelRenderer(VirtualMenuPanel *virtualMenuPanel)
+	    : virtualMenuPanel(virtualMenuPanel)
+	{
+	}
+
+	void LoadArt(SDL_Renderer *renderer);
+	void Render(RenderFunction renderFunction);
+	void UnloadArt();
+
+private:
+	VirtualMenuPanel *virtualMenuPanel;
+	Art menuArt;
+	Art menuArtLevelUp;
+};
 
 class VirtualDirectionPadRenderer {
 public:
@@ -72,6 +103,17 @@ protected:
 	VirtualPadButton *virtualPadButton;
 
 	virtual VirtualGamepadButtonType GetButtonType() = 0;
+};
+
+class StandButtonRenderer : public VirtualPadButtonRenderer {
+public:
+	StandButtonRenderer(VirtualPadButton *standButton)
+	    : VirtualPadButtonRenderer(standButton)
+	{
+	}
+
+private:
+	VirtualGamepadButtonType GetButtonType();
 };
 
 class PrimaryActionButtonRenderer : public VirtualPadButtonRenderer {
@@ -141,7 +183,9 @@ private:
 class VirtualGamepadRenderer {
 public:
 	VirtualGamepadRenderer(VirtualGamepad *virtualGamepad)
-	    : directionPadRenderer(&virtualGamepad->directionPad)
+	    : menuPanelRenderer(&virtualGamepad->menuPanel)
+	    , directionPadRenderer(&virtualGamepad->directionPad)
+	    , standButtonRenderer(&virtualGamepad->standButton)
 	    , primaryActionButtonRenderer(&virtualGamepad->primaryActionButton)
 	    , secondaryActionButtonRenderer(&virtualGamepad->secondaryActionButton)
 	    , spellActionButtonRenderer(&virtualGamepad->spellActionButton)
@@ -156,7 +200,9 @@ public:
 	void UnloadArt();
 
 private:
+	VirtualMenuPanelRenderer menuPanelRenderer;
 	VirtualDirectionPadRenderer directionPadRenderer;
+	StandButtonRenderer standButtonRenderer;
 
 	PrimaryActionButtonRenderer primaryActionButtonRenderer;
 	SecondaryActionButtonRenderer secondaryActionButtonRenderer;
@@ -176,5 +222,3 @@ void RenderVirtualGamepad(SDL_Surface *surface);
 void FreeVirtualGamepadGFX();
 
 } // namespace devilution
-
-#endif

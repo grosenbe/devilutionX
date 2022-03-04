@@ -17,16 +17,13 @@
 #include "init.h"
 #include "minitext.h"
 #include "options.h"
+#include "panels/info_box.hpp"
 #include "towners.h"
 #include "utils/language.h"
 
 namespace devilution {
 
 Item golditem;
-
-std::optional<CelSprite> pSPentSpn2Cels;
-std::optional<CelSprite> pSTextBoxCels;
-std::optional<CelSprite> pSTextSlidCels;
 
 talk_id stextflag;
 
@@ -51,7 +48,7 @@ namespace {
 /** The current towner being interacted with */
 _talker_id talker;
 
-/** Is the curren dialog full size */
+/** Is the current dialog full size */
 bool stextsize;
 
 /** Number of text lines in the current dialog */
@@ -88,16 +85,72 @@ _speech_id gossipend;
 
 /** Maps from towner IDs to NPC names. */
 const char *const TownerNames[] = {
-	"Griswold",
-	"Pepin",
+	N_("Griswold"),
+	N_("Pepin"),
 	"",
-	"Ogden",
-	"Cain",
-	"Farnham",
-	"Adria",
-	"Gillian",
-	"Wirt"
+	N_("Ogden"),
+	N_("Cain"),
+	N_("Farnham"),
+	N_("Adria"),
+	N_("Gillian"),
+	N_("Wirt"),
 };
+
+constexpr int PaddingTop = 32;
+
+// For most languages, line height is always 12.
+// This includes blank lines and divider line.
+constexpr int SmallLineHeight = 12;
+constexpr int SmallTextHeight = 12;
+
+// For larger small fonts (Chinese and Japanese), text lines are
+// taller and overflow.
+// We space out blank lines a bit more to give space to 3-line store items.
+constexpr int LargeLineHeight = SmallLineHeight + 1;
+constexpr int LargeTextHeight = 18;
+
+/**
+ * The line index with the Back / Leave button.
+ * This is a special button that is always the last line.
+ *
+ * For lists with a scrollbar, it is not selectable (mouse-only).
+ */
+int BackButtonLine()
+{
+	if (IsSmallFontTall()) {
+		return stextscrl ? 21 : 20;
+	}
+	return 22;
+}
+
+int LineHeight()
+{
+	return IsSmallFontTall() ? LargeLineHeight : SmallLineHeight;
+}
+
+int TextHeight()
+{
+	return IsSmallFontTall() ? LargeTextHeight : SmallTextHeight;
+}
+
+void CalculateLineHeights()
+{
+	stext[0].y = 0;
+	if (IsSmallFontTall()) {
+		for (int i = 1; i < STORE_LINES; ++i) {
+			// Space out consecutive text lines, unless they are both selectable (never the case currently).
+			if (stext[i].IsText() && stext[i - 1].IsText() && !(stext[i]._ssel && stext[i - 1]._ssel)) {
+				stext[i].y = stext[i - 1].y + LargeTextHeight;
+			} else {
+				stext[i].y = i * LargeLineHeight;
+			}
+		}
+	} else {
+		for (int i = 1; i < STORE_LINES; ++i) {
+			stext[i].y = i * SmallLineHeight;
+		}
+	}
+}
 
 void DrawSTextBack(const Surface &out)
 {
@@ -122,7 +175,7 @@ void DrawSSlider(const Surface &out, int y1, int y2)
 	for (; yd3 < yd2; yd3 += 12) {
 		CelDrawTo(out, { PANEL_X + 601, yd3 }, *pSTextSlidCels, 14);
 	}
-	if (stextsel == 22)
+	if (stextsel == BackButtonLine())
 		yd3 = stextlhold;
 	else
 		yd3 = stextsel;
@@ -146,11 +199,6 @@ void AddSTextVal(int y, int val)
 	stext[y]._sval = val;
 }
 
-void OffsetSTextY(int y, int yo)
-{
-	stext[y]._syoff = yo;
-}
-
 void AddSText(int x, int y, const char *str, UiFlags flags, bool sel)
 {
 	stext[y]._sx = x;
@@ -161,27 +209,45 @@ void AddSText(int x, int y, const char *str, UiFlags flags, bool sel)
 	stext[y]._ssel = sel;
 }
 
-void PrintStoreItem(Item *x, int l, UiFlags flags)
+void AddOptionsBackButton()
+{
+	const int line = BackButtonLine();
+	AddSText(0, line, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
+	stext[line]._syoff = IsSmallFontTall() ? 0 : 6;
+}
+
+void AddItemListBackButton(bool selectable = false)
+{
+	const int line = BackButtonLine();
+	const char *text = _("Back");
+	if (!selectable && IsSmallFontTall()) {
+		AddSText(0, line, text, UiFlags::ColorWhite | UiFlags::AlignRight, selectable);
+	} else {
+		AddSLine(line - 1);
+		AddSText(0, line, text, UiFlags::ColorWhite | UiFlags::AlignCenter, selectable);
+		stext[line]._syoff = 6;
+	}
+}
+
+void PrintStoreItem(const Item &item, int l, UiFlags flags)
 {
 	char sstr[128];
 
 	sstr[0] = '\0';
-	if (x->_iIdentified) {
-		if (x->_iMagical != ITEM_QUALITY_UNIQUE) {
-			if (x->_iPrePower != -1) {
-				PrintItemPower(x->_iPrePower, x);
-				strcat(sstr, tempstr);
+	if (item._iIdentified) {
+		if (item._iMagical != ITEM_QUALITY_UNIQUE) {
+			if (item._iPrePower != -1) {
+				strcat(sstr, PrintItemPower(item._iPrePower, item).c_str());
 			}
 		}
-		if (x->_iSufPower != -1) {
-			PrintItemPower(x->_iSufPower, x);
+		if (item._iSufPower != -1) {
 			if (sstr[0] != '\0')
 				strcat(sstr, _(",  "));
-			strcat(sstr, tempstr);
+			strcat(sstr, PrintItemPower(item._iSufPower, item).c_str());
 		}
 	}
-	if (x->_iMiscId == IMISC_STAFF && x->_iMaxCharges != 0) {
-		strcpy(tempstr, fmt::format(_("Charges: {:d}/{:d}"), x->_iCharges, x->_iMaxCharges).c_str());
+	if (item._iMiscId == IMISC_STAFF && item._iMaxCharges != 0) {
+		strcpy(tempstr, fmt::format(_("Charges: {:d}/{:d}"), item._iCharges, item._iMaxCharges).c_str());
 		if (sstr[0] != '\0')
 			strcat(sstr, _(",  "));
 		strcat(sstr, tempstr);
@@ -191,21 +257,21 @@ void PrintStoreItem(Item *x, int l, UiFlags flags)
 		l++;
 	}
 	sstr[0] = '\0';
-	if (x->_iClass == ICLASS_WEAPON)
-		strcpy(sstr, fmt::format(_("Damage: {:d}-{:d}  "), x->_iMinDam, x->_iMaxDam).c_str());
-	if (x->_iClass == ICLASS_ARMOR)
-		strcpy(sstr, fmt::format(_("Armor: {:d}  "), x->_iAC).c_str());
-	if (x->_iMaxDur != DUR_INDESTRUCTIBLE && x->_iMaxDur != 0) {
-		strcpy(tempstr, fmt::format(_("Dur: {:d}/{:d},  "), x->_iDurability, x->_iMaxDur).c_str());
+	if (item._iClass == ICLASS_WEAPON)
+		strcpy(sstr, fmt::format(_("Damage: {:d}-{:d}  "), item._iMinDam, item._iMaxDam).c_str());
+	if (item._iClass == ICLASS_ARMOR)
+		strcpy(sstr, fmt::format(_("Armor: {:d}  "), item._iAC).c_str());
+	if (item._iMaxDur != DUR_INDESTRUCTIBLE && item._iMaxDur != 0) {
+		strcpy(tempstr, fmt::format(_("Dur: {:d}/{:d},  "), item._iDurability, item._iMaxDur).c_str());
 		strcat(sstr, tempstr);
 	} else {
 		strcat(sstr, _("Indestructible,  "));
 	}
-	if (x->_itype == ItemType::Misc)
+	if (item._itype == ItemType::Misc)
 		sstr[0] = '\0';
-	int8_t str = x->_iMinStr;
-	uint8_t mag = x->_iMinMag;
-	int8_t dex = x->_iMinDex;
+	int8_t str = item._iMinStr;
+	uint8_t mag = item._iMinMag;
+	int8_t dex = item._iMinDex;
 	if (str == 0 && mag == 0 && dex == 0) {
 		strcat(sstr, _("No required attributes"));
 	} else {
@@ -269,13 +335,13 @@ void ScrollSmithBuy(int idx)
 			}
 
 			AddSTextVal(l, smithitem[idx]._iIvalue);
-			PrintStoreItem(&smithitem[idx], l + 1, itemColor);
+			PrintStoreItem(smithitem[idx], l + 1, itemColor);
 			stextdown = l;
 			idx++;
 		}
 	}
 
-	if (stextsel != -1 && !stext[stextsel]._ssel && stextsel != 22)
+	if (stextsel != -1 && !stext[stextsel]._ssel && stextsel != BackButtonLine())
 		stextsel = stextdown;
 }
 
@@ -290,13 +356,15 @@ void StartSmithBuy()
 
 	AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(3);
-	AddSLine(21);
 	ScrollSmithBuy(stextsval);
-	AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
-	OffsetSTextY(22, 6);
+	AddItemListBackButton();
 
 	storenumh = 0;
-	for (int i = 0; !smithitem[i].isEmpty(); i++) {
+	for (Item &item : smithitem) {
+		if (item.isEmpty())
+			continue;
+
+		item._iStatFlag = MyPlayer->CanUseItem(item);
 		storenumh++;
 	}
 
@@ -319,23 +387,26 @@ void ScrollSmithPremiumBuy(int boughtitems)
 			UiFlags itemColor = premiumitems[idx].getTextColorWithStatCheck();
 			AddSText(20, l, premiumitems[idx]._iIName, itemColor, true);
 			AddSTextVal(l, premiumitems[idx]._iIvalue);
-			PrintStoreItem(&premiumitems[idx], l + 1, itemColor);
+			PrintStoreItem(premiumitems[idx], l + 1, itemColor);
 			stextdown = l;
 		} else {
 			l -= 4;
 		}
 		idx++;
 	}
-	if (stextsel != -1 && !stext[stextsel]._ssel && stextsel != 22)
+	if (stextsel != -1 && !stext[stextsel]._ssel && stextsel != BackButtonLine())
 		stextsel = stextdown;
 }
 
 bool StartSmithPremiumBuy()
 {
 	storenumh = 0;
-	for (const auto &item : premiumitems) {
-		if (!item.isEmpty())
-			storenumh++;
+	for (Item &item : premiumitems) {
+		if (item.isEmpty())
+			continue;
+
+		item._iStatFlag = MyPlayer->CanUseItem(item);
+		storenumh++;
 	}
 	if (storenumh == 0) {
 		StartStore(STORE_SMITH);
@@ -352,9 +423,7 @@ bool StartSmithPremiumBuy()
 
 	AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(3);
-	AddSLine(21);
-	AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
-	OffsetSTextY(22, 6);
+	AddItemListBackButton();
 
 	stextsmax = std::max(storenumh - 4, 0);
 
@@ -412,7 +481,7 @@ void ScrollSmithSell(int idx)
 				AddSTextVal(l, storehold[idx]._ivalue);
 			}
 
-			PrintStoreItem(&storehold[idx], l + 1, itemColor);
+			PrintStoreItem(storehold[idx], l + 1, itemColor);
 			stextdown = l;
 		}
 		idx++;
@@ -475,9 +544,7 @@ void StartSmithSell()
 
 		AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 		AddSLine(3);
-		AddSLine(21);
-		AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-		OffsetSTextY(22, 6);
+		AddItemListBackButton(/*selectable=*/true);
 		return;
 	}
 
@@ -490,10 +557,8 @@ void StartSmithSell()
 
 	AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(3);
-	AddSLine(21);
 	ScrollSmithSell(stextsval);
-	AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-	OffsetSTextY(22, 6);
+	AddItemListBackButton();
 }
 
 bool SmithRepairOk(int i)
@@ -565,9 +630,7 @@ void StartSmithRepair()
 
 		AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 		AddSLine(3);
-		AddSLine(21);
-		AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-		OffsetSTextY(22, 6);
+		AddItemListBackButton(/*selectable=*/true);
 		return;
 	}
 
@@ -580,15 +643,14 @@ void StartSmithRepair()
 
 	AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(3);
-	AddSLine(21);
+
 	ScrollSmithSell(stextsval);
-	AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-	OffsetSTextY(22, 6);
+	AddItemListBackButton();
 }
 
 void FillManaPlayer()
 {
-	if (!sgOptions.Gameplay.bAdriaRefillsMana)
+	if (!*sgOptions.Gameplay.adriaRefillsMana)
 		return;
 
 	auto &myPlayer = Players[MyPlayerId];
@@ -633,14 +695,30 @@ void ScrollWitchBuy(int idx)
 			}
 
 			AddSTextVal(l, witchitem[idx]._iIvalue);
-			PrintStoreItem(&witchitem[idx], l + 1, itemColor);
+			PrintStoreItem(witchitem[idx], l + 1, itemColor);
 			stextdown = l;
 			idx++;
 		}
 	}
 
-	if (stextsel != -1 && !stext[stextsel]._ssel && stextsel != 22)
+	if (stextsel != -1 && !stext[stextsel]._ssel && stextsel != BackButtonLine())
 		stextsel = stextdown;
+}
+
+void WitchBookLevel(Item &bookItem)
+{
+	if (bookItem._iMiscId != IMISC_BOOK)
+		return;
+	bookItem._iMinMag = spelldata[bookItem._iSpell].sMinInt;
+	int8_t spellLevel = Players[MyPlayerId]._pSplLvl[bookItem._iSpell];
+	while (spellLevel > 0) {
+		bookItem._iMinMag += 20 * bookItem._iMinMag / 100;
+		spellLevel--;
+		if (bookItem._iMinMag + 20 * bookItem._iMinMag / 100 > 255) {
+			bookItem._iMinMag = 255;
+			spellLevel = 0;
+		}
+	}
 }
 
 void StartWitchBuy()
@@ -655,13 +733,16 @@ void StartWitchBuy()
 
 	AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(3);
-	AddSLine(21);
 	ScrollWitchBuy(stextsval);
-	AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
-	OffsetSTextY(22, 6);
+	AddItemListBackButton();
 
 	storenumh = 0;
-	for (int i = 0; !witchitem[i].isEmpty(); i++) {
+	for (Item &item : witchitem) {
+		if (item.isEmpty())
+			continue;
+
+		WitchBookLevel(item);
+		item._iStatFlag = MyPlayer->CanUseItem(item);
 		storenumh++;
 	}
 	stextsmax = std::max(storenumh - 4, 0);
@@ -747,9 +828,7 @@ void StartWitchSell()
 
 		AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 		AddSLine(3);
-		AddSLine(21);
-		AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-		OffsetSTextY(22, 6);
+		AddItemListBackButton(/*selectable=*/true);
 		return;
 	}
 
@@ -762,10 +841,8 @@ void StartWitchSell()
 
 	AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(3);
-	AddSLine(21);
 	ScrollSmithSell(stextsval);
-	AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-	OffsetSTextY(22, 6);
+	AddItemListBackButton();
 }
 
 bool WitchRechargeOk(int i)
@@ -828,9 +905,7 @@ void StartWitchRecharge()
 
 		AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 		AddSLine(3);
-		AddSLine(21);
-		AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-		OffsetSTextY(22, 6);
+		AddItemListBackButton(/*selectable=*/true);
 		return;
 	}
 
@@ -843,10 +918,8 @@ void StartWitchRecharge()
 
 	AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(3);
-	AddSLine(21);
 	ScrollSmithSell(stextsval);
-	AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-	OffsetSTextY(22, 6);
+	AddItemListBackButton();
 }
 
 void StoreNoMoney()
@@ -896,7 +969,7 @@ void StoreConfirm()
 		AddSText(20, 8, item._iName, itemColor, false);
 
 	AddSTextVal(8, item._iIvalue);
-	PrintStoreItem(&item, 9, itemColor);
+	PrintStoreItem(item, 9, itemColor);
 
 	switch (stextshold) {
 	case STORE_BBOY:
@@ -954,12 +1027,13 @@ void SStartBoyBuy()
 	stextscrl = false;
 
 	/* TRANSLATORS: This text is white space sensitive. Check for correct alignment! */
-	strcpy(tempstr, fmt::format(_("I have this item for sale:             Your gold: {:d}"), Players[MyPlayerId]._pGold).c_str());
+	strcpy(tempstr, fmt::format(_("I have this item for sale:             Your gold: {:d}"), MyPlayer->_pGold).c_str());
 
 	AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(3);
-	AddSLine(21);
+
 	UiFlags itemColor = boyitem.getTextColorWithStatCheck();
+	boyitem._iStatFlag = MyPlayer->CanUseItem(boyitem);
 
 	if (boyitem._iMagical != ITEM_QUALITY_NORMAL)
 		AddSText(20, 10, boyitem._iIName, itemColor, true);
@@ -970,9 +1044,16 @@ void SStartBoyBuy()
 		AddSTextVal(10, boyitem._iIvalue - (boyitem._iIvalue / 4));
 	else
 		AddSTextVal(10, boyitem._iIvalue + (boyitem._iIvalue / 2));
-	PrintStoreItem(&boyitem, 11, itemColor);
-	AddSText(0, 22, _("Leave"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-	OffsetSTextY(22, 6);
+	PrintStoreItem(boyitem, 11, itemColor);
+
+	{
+		// Add a Leave button. Unlike the other item list back buttons,
+		// this one has different text and different layout in LargerSmallFont locales.
+		const int line = BackButtonLine();
+		AddSLine(line - 1);
+		AddSText(0, line, _("Leave"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
+		stext[line]._syoff = 6;
+	}
 }
 
 void HealPlayer()
@@ -1012,13 +1093,13 @@ void ScrollHealerBuy(int idx)
 
 			AddSText(20, l, healitem[idx]._iName, itemColor, true);
 			AddSTextVal(l, healitem[idx]._iIvalue);
-			PrintStoreItem(&healitem[idx], l + 1, itemColor);
+			PrintStoreItem(healitem[idx], l + 1, itemColor);
 			stextdown = l;
 			idx++;
 		}
 	}
 
-	if (stextsel != -1 && !stext[stextsel]._ssel && stextsel != 22)
+	if (stextsel != -1 && !stext[stextsel]._ssel && stextsel != BackButtonLine())
 		stextsel = stextdown;
 }
 
@@ -1033,13 +1114,16 @@ void StartHealerBuy()
 
 	AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(3);
-	AddSLine(21);
+
 	ScrollHealerBuy(stextsval);
-	AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
-	OffsetSTextY(22, 6);
+	AddItemListBackButton();
 
 	storenumh = 0;
-	for (int i = 0; !healitem[i].isEmpty(); i++) {
+	for (Item &item : healitem) {
+		if (item.isEmpty())
+			continue;
+
+		item._iStatFlag = MyPlayer->CanUseItem(item);
 		storenumh++;
 	}
 
@@ -1150,9 +1234,7 @@ void StartStorytellerIdentify()
 
 		AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 		AddSLine(3);
-		AddSLine(21);
-		AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-		OffsetSTextY(22, 6);
+		AddItemListBackButton(/*selectable=*/true);
 		return;
 	}
 
@@ -1165,10 +1247,9 @@ void StartStorytellerIdentify()
 
 	AddSText(0, 1, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(3);
-	AddSLine(21);
+
 	ScrollSmithSell(stextsval);
-	AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
-	OffsetSTextY(22, 6);
+	AddItemListBackButton();
 }
 
 void StartStorytellerIdentifyShow()
@@ -1183,7 +1264,7 @@ void StartStorytellerIdentifyShow()
 
 	AddSText(0, 7, _("This item is:"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
 	AddSText(20, 11, item._iIName, itemColor, false);
-	PrintStoreItem(&item, 12, itemColor);
+	PrintStoreItem(item, 12, itemColor);
 	AddSText(0, 18, _("Done"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
 }
 
@@ -1193,16 +1274,16 @@ void StartTalk()
 
 	stextsize = false;
 	stextscrl = false;
-	strcpy(tempstr, fmt::format(_("Talk to {:s}"), TownerNames[talker]).c_str());
+	strcpy(tempstr, fmt::format(_("Talk to {:s}"), _(TownerNames[talker])).c_str());
 	AddSText(0, 2, tempstr, UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSLine(5);
 	if (gbIsSpawn) {
-		strcpy(tempstr, fmt::format(_("Talking to {:s}"), TownerNames[talker]).c_str());
+		strcpy(tempstr, fmt::format(_("Talking to {:s}"), _(TownerNames[talker])).c_str());
 		AddSText(0, 10, tempstr, UiFlags::ColorWhite | UiFlags::AlignCenter, false);
 		AddSText(0, 12, _("is not available"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
 		AddSText(0, 14, _("in the shareware"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
 		AddSText(0, 16, _("version"), UiFlags::ColorWhite | UiFlags::AlignCenter, false);
-		AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
+		AddOptionsBackButton();
 		return;
 	}
 
@@ -1229,7 +1310,7 @@ void StartTalk()
 		}
 	}
 	AddSText(0, sn2, _("Gossip"), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
-	AddSText(0, 22, _("Back"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
+	AddOptionsBackButton();
 }
 
 void StartTavern()
@@ -1249,7 +1330,7 @@ void StartBarmaid()
 {
 	stextsize = false;
 	stextscrl = false;
-	AddSText(0, 2, "Gillian", UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
+	AddSText(0, 2, _("Gillian"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSText(0, 9, _("Would you like to:"), UiFlags::ColorWhitegold | UiFlags::AlignCenter, false);
 	AddSText(0, 12, _("Talk to Gillian"), UiFlags::ColorBlue | UiFlags::AlignCenter, true);
 	AddSText(0, 18, _("Say goodbye"), UiFlags::ColorWhite | UiFlags::AlignCenter, true);
@@ -1322,9 +1403,9 @@ void SmithBuyItem()
 	CalcPlrInv(myPlayer, true);
 }
 
-void SmitBuyEnter()
+void SmithBuyEnter()
 {
-	if (stextsel == 22) {
+	if (stextsel == BackButtonLine()) {
 		StartStore(STORE_SMITH);
 		stextsel = 12;
 		return;
@@ -1382,9 +1463,9 @@ void SmithBuyPItem()
 	SpawnPremium(MyPlayerId);
 }
 
-void SmitPremiumBuyEnter()
+void SmithPremiumBuyEnter()
 {
-	if (stextsel == 22) {
+	if (stextsel == BackButtonLine()) {
 		StartStore(STORE_SMITH);
 		stextsel = 14;
 		return;
@@ -1527,9 +1608,9 @@ void StoreSellItem()
 	}
 }
 
-void SmitSellEnter()
+void SmithSellEnter()
 {
-	if (stextsel == 22) {
+	if (stextsel == BackButtonLine()) {
 		StartStore(STORE_SMITH);
 		stextsel = 16;
 		return;
@@ -1576,9 +1657,9 @@ void SmithRepairItem()
 	myPlayer.InvList[i]._iDurability = myPlayer.InvList[i]._iMaxDur;
 }
 
-void SmitRepairEnter()
+void SmithRepairEnter()
 {
-	if (stextsel == 22) {
+	if (stextsel == BackButtonLine()) {
 		StartStore(STORE_SMITH);
 		stextsel = 18;
 		return;
@@ -1656,7 +1737,7 @@ void WitchBuyItem()
 
 void WitchBuyEnter()
 {
-	if (stextsel == 22) {
+	if (stextsel == BackButtonLine()) {
 		StartStore(STORE_WITCH);
 		stextsel = 14;
 		return;
@@ -1689,7 +1770,7 @@ void WitchBuyEnter()
 
 void WitchSellEnter()
 {
-	if (stextsel == 22) {
+	if (stextsel == BackButtonLine()) {
 		StartStore(STORE_WITCH);
 		stextsel = 16;
 		return;
@@ -1730,7 +1811,7 @@ void WitchRechargeItem()
 
 void WitchRechargeEnter()
 {
-	if (stextsel == 22) {
+	if (stextsel == BackButtonLine()) {
 		StartStore(STORE_WITCH);
 		stextsel = 18;
 		return;
@@ -1939,7 +2020,7 @@ void ConfirmEnter()
 
 	StartStore(stextshold);
 
-	if (stextsel == 22)
+	if (stextsel == BackButtonLine())
 		return;
 
 	stextsel = stextlhold;
@@ -1972,7 +2053,7 @@ void HealerEnter()
 
 void HealerBuyEnter()
 {
-	if (stextsel == 22) {
+	if (stextsel == BackButtonLine()) {
 		StartStore(STORE_HEALER);
 		stextsel = 16;
 		return;
@@ -2026,7 +2107,7 @@ void StorytellerEnter()
 
 void StorytellerIdentifyEnter()
 {
-	if (stextsel == 22) {
+	if (stextsel == BackButtonLine()) {
 		StartStore(STORE_STORY);
 		stextsel = 14;
 		return;
@@ -2048,7 +2129,7 @@ void StorytellerIdentifyEnter()
 
 void TalkEnter()
 {
-	if (stextsel == 22) {
+	if (stextsel == BackButtonLine()) {
 		StartStore(stextshold);
 		stextsel = stextlhold;
 		return;
@@ -2200,9 +2281,6 @@ void AddStoreHoldRepair(Item *itm, int8_t i)
 
 void InitStores()
 {
-	pSPentSpn2Cels = LoadCel("Data\\PentSpn2.CEL", 12);
-	pSTextBoxCels = LoadCel("Data\\TextBox2.CEL", 271);
-	pSTextSlidCels = LoadCel("Data\\TextSlid.CEL", 12);
 	ClearSText(0, STORE_LINES);
 	stextflag = STORE_NONE;
 	stextsize = false;
@@ -2241,8 +2319,7 @@ void SetupTownStores()
 
 void FreeStoreMem()
 {
-	pSTextBoxCels = std::nullopt;
-	pSTextSlidCels = std::nullopt;
+	stextflag = STORE_NONE;
 }
 
 void PrintSString(const Surface &out, int margin, int line, const char *text, UiFlags flags, int price)
@@ -2252,7 +2329,7 @@ void PrintSString(const Surface &out, int margin, int line, const char *text, Ui
 		sx += 320;
 	}
 
-	int sy = UI_OFFSET_Y + 32 + line * 12 + stext[line]._syoff;
+	const int sy = UI_OFFSET_Y + PaddingTop + stext[line].y + stext[line]._syoff;
 
 	int width = stextsize ? 575 : 255;
 	if (stextscrl && line >= 4 && line <= 20) {
@@ -2273,10 +2350,9 @@ void PrintSString(const Surface &out, int margin, int line, const char *text, Ui
 	}
 }
 
-void DrawSLine(const Surface &out, int y)
+void DrawSLine(const Surface &out, int sy)
 {
 	int sx = 26;
-	int sy = y * 12;
 	int width = 587;
 
 	if (!stextsize) {
@@ -2285,7 +2361,7 @@ void DrawSLine(const Surface &out, int y)
 	}
 
 	BYTE *src = out.at(PANEL_LEFT + sx, UI_OFFSET_Y + 25);
-	BYTE *dst = out.at(PANEL_X + sx, UI_OFFSET_Y + sy + 38);
+	BYTE *dst = out.at(PANEL_X + sx, sy);
 
 	for (int i = 0; i < 3; i++, src += out.pitch(), dst += out.pitch())
 		memcpy(dst, src, width);
@@ -2316,19 +2392,29 @@ void StartStore(talk_id s)
 	invflag = false;
 	chrflag = false;
 	QuestLogIsOpen = false;
-	dropGoldFlag = false;
+	CloseGoldDrop();
 	ClearSText(0, STORE_LINES);
 	ReleaseStoreBtn();
 	switch (s) {
 	case STORE_SMITH:
 		StartSmith();
 		break;
-	case STORE_SBUY:
-		if (storenumh > 0)
+	case STORE_SBUY: {
+		bool hasAnyItems = false;
+		for (int i = 0; !smithitem[i].isEmpty(); i++) {
+			hasAnyItems = true;
+			break;
+		}
+		if (hasAnyItems)
 			StartSmithBuy();
-		else
-			StartSmith();
+		else {
+			stextflag = STORE_SBUY;
+			stextlhold = 12;
+			StoreESC();
+			return;
+		}
 		break;
+	}
 	case STORE_SSELL:
 		StartSmithSell();
 		break;
@@ -2443,10 +2529,11 @@ void DrawSText(const Surface &out)
 		}
 	}
 
+	CalculateLineHeights();
 	for (int i = 0; i < STORE_LINES; i++) {
-		if (stext[i]._sline != 0)
-			DrawSLine(out, i);
-		if (stext[i]._sstr[0] != '\0')
+		if (stext[i].IsDivider())
+			DrawSLine(out, UI_OFFSET_Y + PaddingTop + stext[i].y + TextHeight() / 2);
+		if (stext[i].IsText())
 			PrintSString(out, stext[i]._sx, i, stext[i]._sstr, stext[i].flags, stext[i]._sval);
 	}
 
@@ -2659,16 +2746,16 @@ void StoreEnter()
 		SmithEnter();
 		break;
 	case STORE_SPBUY:
-		SmitPremiumBuyEnter();
+		SmithPremiumBuyEnter();
 		break;
 	case STORE_SBUY:
-		SmitBuyEnter();
+		SmithBuyEnter();
 		break;
 	case STORE_SSELL:
-		SmitSellEnter();
+		SmithSellEnter();
 		break;
 	case STORE_SREPAIR:
-		SmitRepairEnter();
+		SmithRepairEnter();
 		break;
 	case STORE_WITCH:
 		WitchEnter();
@@ -2735,7 +2822,7 @@ void CheckStoreBtn()
 		qtextflag = false;
 		if (leveltype == DTYPE_TOWN)
 			stream_stop();
-	} else if (stextsel != -1 && MousePosition.y >= (32 + UI_OFFSET_Y) && MousePosition.y <= (320 + UI_OFFSET_Y)) {
+	} else if (stextsel != -1 && MousePosition.y >= (PaddingTop + UI_OFFSET_Y) && MousePosition.y <= (320 + UI_OFFSET_Y)) {
 		if (!stextsize) {
 			if (MousePosition.x < 344 + PANEL_LEFT || MousePosition.x > 616 + PANEL_LEFT)
 				return;
@@ -2743,8 +2830,12 @@ void CheckStoreBtn()
 			if (MousePosition.x < 24 + PANEL_LEFT || MousePosition.x > 616 + PANEL_LEFT)
 				return;
 		}
-		int y = (MousePosition.y - (32 + UI_OFFSET_Y)) / 12;
+
+		const int relativeY = MousePosition.y - (UI_OFFSET_Y + PaddingTop);
+
 		if (stextscrl && MousePosition.x > 600 + PANEL_LEFT) {
+			// Scroll bar is always measured in terms of the small line height.
+			int y = relativeY / SmallLineHeight;
 			if (y == 4) {
 				if (stextscrlubtn <= 0) {
 					StoreUp();
@@ -2761,17 +2852,29 @@ void CheckStoreBtn()
 					stextscrldbtn--;
 				}
 			}
-		} else if (y >= 5) {
-			if (y >= 23)
-				y = 22;
-			if (stextscrl && y < 21 && !stext[y]._ssel) {
+			return;
+		}
+
+		int y = relativeY / LineHeight();
+
+		// Large small fonts draw beyond LineHeight. Check if the click was on the overflow text.
+		if (IsSmallFontTall() && y > 0 && y < STORE_LINES
+		    && stext[y - 1].IsText() && !stext[y].IsText()
+		    && relativeY < stext[y - 1].y + LargeTextHeight) {
+			--y;
+		}
+
+		if (y >= 5) {
+			if (y >= BackButtonLine() + 1)
+				y = BackButtonLine();
+			if (stextscrl && y <= 20 && !stext[y]._ssel) {
 				if (stext[y - 2]._ssel) {
 					y -= 2;
 				} else if (stext[y - 1]._ssel) {
 					y--;
 				}
 			}
-			if (stext[y]._ssel || (stextscrl && y == 22)) {
+			if (stext[y]._ssel || (stextscrl && y == BackButtonLine())) {
 				stextsel = y;
 				StoreEnter();
 			}

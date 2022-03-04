@@ -25,10 +25,6 @@ enum class ScrollDirection : uint8_t {
 	NorthWest,
 };
 
-// Defined in SourceX/controls/plctrls.cpp
-extern bool sgbControllerActive;
-extern bool IsMovingMouseCursorWithController();
-
 extern int LightTableIndex;
 extern uint32_t level_cel_block;
 extern char arch_draw_type;
@@ -36,6 +32,7 @@ extern bool cel_transparency_active;
 extern bool cel_foliage_active;
 extern int level_piece_id;
 extern bool AutoMapShowItems;
+extern bool frameflag;
 
 /**
  * @brief Returns the offset for the walking animation

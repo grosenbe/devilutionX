@@ -5,6 +5,8 @@
  */
 #include "path.h"
 
+#include <array>
+
 #include "gendung.h"
 #include "objects.h"
 
@@ -285,7 +287,7 @@ bool GetPath(const std::function<bool(Point)> &posOk, PATHNODE *pPath, Point des
 
 bool IsTileNotSolid(Point position)
 {
-	if (position.x < 0 || position.y < 0 || position.x >= MAXDUNX || position.y >= MAXDUNY) {
+	if (!InDungeonBounds(position)) {
 		return false;
 	}
 
@@ -294,7 +296,7 @@ bool IsTileNotSolid(Point position)
 
 bool IsTileSolid(Point position)
 {
-	if (position.x < 0 || position.y < 0 || position.x >= MAXDUNX || position.y >= MAXDUNY) {
+	if (!InDungeonBounds(position)) {
 		return false;
 	}
 
@@ -303,15 +305,39 @@ bool IsTileSolid(Point position)
 
 bool IsTileWalkable(Point position, bool ignoreDoors)
 {
-	if (dObject[position.x][position.y] != 0) {
-		int oi = abs(dObject[position.x][position.y]) - 1;
-		if (ignoreDoors && Objects[oi].IsDoor())
+	Object *object = ObjectAtPosition(position);
+	if (object != nullptr) {
+		if (ignoreDoors && object->IsDoor()) {
 			return true;
-		if (Objects[oi]._oSolidFlag)
+		}
+		if (object->_oSolidFlag) {
 			return false;
+		}
 	}
 
 	return !IsTileSolid(position);
+}
+
+bool IsTileOccupied(Point position)
+{
+	if (!InDungeonBounds(position)) {
+		return true; // OOB positions are considered occupied.
+	}
+
+	if (IsTileSolid(position)) {
+		return true;
+	}
+	if (dMonster[position.x][position.y] != 0) {
+		return true;
+	}
+	if (dPlayer[position.x][position.y] != 0) {
+		return true;
+	}
+	if (IsObjectAtPosition(position)) {
+		return true;
+	}
+
+	return false;
 }
 
 int FindPath(const std::function<bool(Point)> &posOk, Point startPosition, Point destinationPosition, int8_t path[MAX_PATH_LENGTH])
@@ -384,7 +410,144 @@ bool path_solid_pieces(Point startPosition, Point destinationPosition)
 	return rv;
 }
 
-#ifdef RUN_TESTS
+std::optional<Point> FindClosestValidPosition(const std::function<bool(Point)> &posOk, Point startingPosition, unsigned int minimumRadius, unsigned int maximumRadius)
+{
+	if (minimumRadius > maximumRadius) {
+		return {}; // No valid search space with the given params.
+	}
+
+	if (minimumRadius == 0U) {
+		if (posOk(startingPosition)) {
+			return startingPosition;
+		}
+	}
+
+	if (minimumRadius <= 1U && maximumRadius >= 1U) {
+		// unrolling the case for radius 1 to save having to guard the corner check in the loop below.
+
+		Point candidatePosition = startingPosition + Direction::SouthWest;
+		if (posOk(candidatePosition)) {
+			return candidatePosition;
+		}
+		candidatePosition = startingPosition + Direction::NorthEast;
+		if (posOk(candidatePosition)) {
+			return candidatePosition;
+		}
+
+		candidatePosition = startingPosition + Direction::NorthWest;
+		if (posOk(candidatePosition)) {
+			return candidatePosition;
+		}
+
+		candidatePosition = startingPosition + Direction::SouthEast;
+		if (posOk(candidatePosition)) {
+			return candidatePosition;
+		}
+	}
+
+	if (maximumRadius >= 2U) {
+		for (int i = static_cast<int>(std::max(minimumRadius, 2U)); i <= static_cast<int>(std::min(maximumRadius, 50U)); i++) {
+			int x = 0;
+			int y = i;
+
+			// special case the checks when x == 0 to save checking the same tiles twice
+			Point candidatePosition = startingPosition + Displacement { x, y };
+			if (posOk(candidatePosition)) {
+				return candidatePosition;
+			}
+			candidatePosition = startingPosition + Displacement { x, -y };
+			if (posOk(candidatePosition)) {
+				return candidatePosition;
+			}
+
+			while (x < i - 1) {
+				x++;
+
+				candidatePosition = startingPosition + Displacement { -x, y };
+				if (posOk(candidatePosition)) {
+					return candidatePosition;
+				}
+
+				candidatePosition = startingPosition + Displacement { x, y };
+				if (posOk(candidatePosition)) {
+					return candidatePosition;
+				}
+
+				candidatePosition = startingPosition + Displacement { -x, -y };
+				if (posOk(candidatePosition)) {
+					return candidatePosition;
+				}
+
+				candidatePosition = startingPosition + Displacement { x, -y };
+				if (posOk(candidatePosition)) {
+					return candidatePosition;
+				}
+			}
+
+			// special case for inset corners
+			y--;
+			candidatePosition = startingPosition + Displacement { -x, y };
+			if (posOk(candidatePosition)) {
+				return candidatePosition;
+			}
+
+			candidatePosition = startingPosition + Displacement { x, y };
+			if (posOk(candidatePosition)) {
+				return candidatePosition;
+			}
+
+			candidatePosition = startingPosition + Displacement { -x, -y };
+			if (posOk(candidatePosition)) {
+				return candidatePosition;
+			}
+
+			candidatePosition = startingPosition + Displacement { x, -y };
+			if (posOk(candidatePosition)) {
+				return candidatePosition;
+			}
+			x++;
+
+			while (y > 0) {
+				candidatePosition = startingPosition + Displacement { -x, y };
+				if (posOk(candidatePosition)) {
+					return candidatePosition;
+				}
+
+				candidatePosition = startingPosition + Displacement { x, y };
+				if (posOk(candidatePosition)) {
+					return candidatePosition;
+				}
+
+				candidatePosition = startingPosition + Displacement { -x, -y };
+				if (posOk(candidatePosition)) {
+					return candidatePosition;
+				}
+
+				candidatePosition = startingPosition + Displacement { x, -y };
+				if (posOk(candidatePosition)) {
+					return candidatePosition;
+				}
+
+				y--;
+			}
+
+			// as above, special case for y == 0
+			candidatePosition = startingPosition + Displacement { -x, y };
+			if (posOk(candidatePosition)) {
+				return candidatePosition;
+			}
+
+			candidatePosition = startingPosition + Displacement { x, y };
+			if (posOk(candidatePosition)) {
+				return candidatePosition;
+			}
+		}
+	}
+
+	return {};
+}
+
+#ifdef BUILD_TESTING
 int TestPathGetHeuristicCost(Point startPosition, Point destinationPosition)
 {
 	return GetHeuristicCost(startPosition, destinationPosition);

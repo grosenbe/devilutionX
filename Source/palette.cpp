@@ -19,6 +19,8 @@ SDL_Color system_palette[256];
 SDL_Color orig_palette[256];
 Uint8 paletteTransparencyLookup[256][256];
 
+uint16_t paletteTransparencyLookupBlack16[65536];
+
 namespace {
 
 /** Specifies whether the palette has max brightness. */
@@ -26,9 +28,9 @@ bool sgbFadedIn = true;
 
 void LoadGamma()
 {
-	int gammaValue = sgOptions.Graphics.nGammaCorrection;
+	int gammaValue = *sgOptions.Graphics.gammaCorrection;
 	gammaValue = clamp(gammaValue, 30, 100);
-	sgOptions.Graphics.nGammaCorrection = gammaValue - gammaValue % 5;
+	sgOptions.Graphics.gammaCorrection.SetValue(gammaValue - gammaValue % 5);
 }
 
 Uint8 FindBestMatchForColor(SDL_Color *palette, SDL_Color color, int skipFrom, int skipTo)
@@ -88,6 +90,17 @@ void GenerateBlendedLookupTable(SDL_Color *palette, int skipFrom, int skipTo, in
 			paletteTransparencyLookup[i][j] = best;
 		}
 	}
+
+	for (unsigned i = 0; i < 256; ++i) {
+		for (unsigned j = 0; j < 256; ++j) {
+#if SDL_BYTEORDER == SDL_LIL_ENDIAN
+			const std::uint16_t index = i | (j << 8);
+#else
+			const std::uint16_t index = j | (i << 8);
+#endif
+			paletteTransparencyLookupBlack16[index] = paletteTransparencyLookup[0][i] | (paletteTransparencyLookup[0][j] << 8);
+		}
+	}
 }
 
 /**
@@ -104,9 +117,6 @@ void CycleColors(int from, int to)
 		}
 		system_palette[to] = col;
 	}
-
-	if (!sgOptions.Graphics.bBlendedTransparancy)
-		return;
 
 	for (auto &palette : paletteTransparencyLookup) {
 		Uint8 col = palette[from];
@@ -139,9 +149,6 @@ void CycleColorsReverse(int from, int to)
 		system_palette[from] = col;
 	}
 
-	if (!sgOptions.Graphics.bBlendedTransparancy)
-		return;
-
 	for (auto &palette : paletteTransparencyLookup) {
 		Uint8 col = palette[to];
 		for (int j = to; j > from; j--) {
@@ -171,7 +178,7 @@ void palette_update(int first, int ncolor)
 
 void ApplyGamma(SDL_Color *dst, const SDL_Color *src, int n)
 {
-	double g = sgOptions.Graphics.nGammaCorrection / 100.0;
+	double g = *sgOptions.Graphics.gammaCorrection / 100.0;
 
 	for (int i = 0; i < n; i++) {
 		dst[i].r = static_cast<Uint8>(pow(src[i].r / 256.0, g) * 256.0);
@@ -211,7 +218,7 @@ void LoadPalette(const char *pszFileName, bool blend /*= true*/)
 #endif
 	}
 
-	if (blend && sgOptions.Graphics.bBlendedTransparancy) {
+	if (blend) {
 		if (leveltype == DTYPE_CAVES || leveltype == DTYPE_CRYPT) {
 			GenerateBlendedLookupTable(orig_palette, 1, 31);
 		} else if (leveltype == DTYPE_NEST) {
@@ -249,10 +256,9 @@ void LoadRndLvlPal(dungeon_type l)
 
 void IncreaseGamma()
 {
-	if (sgOptions.Graphics.nGammaCorrection < 100) {
-		sgOptions.Graphics.nGammaCorrection += 5;
-		if (sgOptions.Graphics.nGammaCorrection > 100)
-			sgOptions.Graphics.nGammaCorrection = 100;
+	int gammaValue = *sgOptions.Graphics.gammaCorrection;
+	if (gammaValue < 100) {
+		sgOptions.Graphics.gammaCorrection.SetValue(std::min(gammaValue + 5, 100));
 		ApplyGamma(system_palette, logical_palette, 256);
 		palette_update();
 	}
@@ -260,10 +266,9 @@ void IncreaseGamma()
 
 void DecreaseGamma()
 {
-	if (sgOptions.Graphics.nGammaCorrection > 30) {
-		sgOptions.Graphics.nGammaCorrection -= 5;
-		if (sgOptions.Graphics.nGammaCorrection < 30)
-			sgOptions.Graphics.nGammaCorrection = 30;
+	int gammaValue = *sgOptions.Graphics.gammaCorrection;
+	if (gammaValue > 30) {
+		sgOptions.Graphics.gammaCorrection.SetValue(std::max(gammaValue - 5, 30));
 		ApplyGamma(system_palette, logical_palette, 256);
 		palette_update();
 	}
@@ -272,11 +277,11 @@ void DecreaseGamma()
 int UpdateGamma(int gamma)
 {
 	if (gamma > 0) {
-		sgOptions.Graphics.nGammaCorrection = 130 - gamma;
+		sgOptions.Graphics.gammaCorrection.SetValue(130 - gamma);
 		ApplyGamma(system_palette, logical_palette, 256);
 		palette_update();
 	}
-	return 130 - sgOptions.Graphics.nGammaCorrection;
+	return 130 - *sgOptions.Graphics.gammaCorrection;
 }
 
 void SetFadeLevel(int fadeval)
@@ -394,20 +399,18 @@ void palette_update_quest_palette(int n)
 	logical_palette[i] = orig_palette[i];
 	ApplyGamma(system_palette, logical_palette, 32);
 	palette_update(0, 31);
-	if (sgOptions.Graphics.bBlendedTransparancy) {
-		// Update blended transparency, but only for the color that was updated
-		for (int j = 0; j < 256; j++) {
-			if (i == j) { // No need to calculate transparency between 2 identical colors
-				paletteTransparencyLookup[i][j] = j;
-				continue;
-			}
-			SDL_Color blendedColor;
-			blendedColor.r = ((int)logical_palette[i].r + (int)logical_palette[j].r) / 2;
-			blendedColor.g = ((int)logical_palette[i].g + (int)logical_palette[j].g) / 2;
-			blendedColor.b = ((int)logical_palette[i].b + (int)logical_palette[j].b) / 2;
-			Uint8 best = FindBestMatchForColor(logical_palette, blendedColor, 1, 31);
-			paletteTransparencyLookup[i][j] = paletteTransparencyLookup[j][i] = best;
+	// Update blended transparency, but only for the color that was updated
+	for (int j = 0; j < 256; j++) {
+		if (i == j) { // No need to calculate transparency between 2 identical colors
+			paletteTransparencyLookup[i][j] = j;
+			continue;
 		}
+		SDL_Color blendedColor;
+		blendedColor.r = ((int)logical_palette[i].r + (int)logical_palette[j].r) / 2;
+		blendedColor.g = ((int)logical_palette[i].g + (int)logical_palette[j].g) / 2;
+		blendedColor.b = ((int)logical_palette[i].b + (int)logical_palette[j].b) / 2;
+		Uint8 best = FindBestMatchForColor(logical_palette, blendedColor, 1, 31);
+		paletteTransparencyLookup[i][j] = paletteTransparencyLookup[j][i] = best;
 	}
 }
 

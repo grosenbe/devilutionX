@@ -7,15 +7,18 @@
 
 #include <array>
 
+#include "automap.h"
 #include "engine.h"
 #include "engine/point.hpp"
 #include "miniwin/miniwin.h"
+#include "utils/attributes.h"
 
 namespace devilution {
 
 #define MAXLIGHTS 32
 #define MAXVISION 32
-#define LIGHTSIZE (27 * 256)
+/** 16 light levels + infravision + stone curse + red for pause/death screen */
+#define LIGHTSIZE (19 * 256)
 #define NO_LIGHT -1
 
 struct LightPosition {
@@ -42,19 +45,18 @@ extern int VisionId;
 extern Light Lights[MAXLIGHTS];
 extern uint8_t ActiveLights[MAXLIGHTS];
 extern int ActiveLightCount;
-extern char LightsMax;
+constexpr char LightsMax = 15;
 extern std::array<uint8_t, LIGHTSIZE> LightTables;
-extern bool DisableLighting;
+extern DVL_API_FOR_TEST bool DisableLighting;
 extern bool UpdateLighting;
 
 void DoLighting(Point position, int nRadius, int Lnum);
 void DoUnVision(Point position, int nRadius);
-void DoVision(Point position, int nRadius, bool doautomap, bool visible);
+void DoVision(Point position, int nRadius, MapExplorationType doautomap, bool visible);
 void MakeLightTable();
 #ifdef _DEBUG
 void ToggleLighting();
 #endif
-void InitLightMax();
 void InitLighting();
 int AddLight(Point position, int r);
 void AddUnLight(int i);
@@ -73,8 +75,8 @@ void lighting_color_cycling();
 
 /* rdata */
 
-extern const int8_t CrawlTable[2749];
-extern const int CrawlNum[19];
+extern DVL_API_FOR_TEST const int8_t CrawlTable[2749];
+extern DVL_API_FOR_TEST const int CrawlNum[19];
 extern const uint8_t VisionCrawlTable[23][30];
 
 } // namespace devilution

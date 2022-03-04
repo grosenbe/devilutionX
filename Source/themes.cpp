@@ -5,6 +5,7 @@
  */
 #include "themes.h"
 
+#include "engine/points_in_rectangle_range.hpp"
 #include "engine/random.hpp"
 #include "items.h"
 #include "monster.h"
@@ -48,19 +49,6 @@ int trm5y[] = {
 	1, 1, 1, 1, 1,
 	2, 2, 2, 2, 2
 };
-/** Specifies a 3x3 area to fit theme objects. */
-int trm3x[] = {
-	-1, 0, 1,
-	-1, 0, 1,
-	-1, 0, 1
-};
-/** Specifies a 3x3 area to fit theme objects. */
-int trm3y[] = {
-	-1, -1, -1,
-	0, 0, 0,
-	1, 1, 1
-};
-
 bool TFit_Shrine(int i)
 {
 	int xp = 0;
@@ -68,24 +56,25 @@ bool TFit_Shrine(int i)
 	int found = 0;
 
 	while (found == 0) {
+		Point testPosition { xp, yp };
 		if (dTransVal[xp][yp] == themes[i].ttval) {
 			if (nTrapTable[dPiece[xp][yp - 1]]
-			    && IsTileNotSolid({ xp - 1, yp })
-			    && IsTileNotSolid({ xp + 1, yp })
+			    && IsTileNotSolid(testPosition + Direction::NorthWest)
+			    && IsTileNotSolid(testPosition + Direction::SouthEast)
 			    && dTransVal[xp - 1][yp] == themes[i].ttval
 			    && dTransVal[xp + 1][yp] == themes[i].ttval
-			    && dObject[xp - 1][yp - 1] == 0
-			    && dObject[xp + 1][yp - 1] == 0) {
+			    && !IsObjectAtPosition(testPosition + Direction::North)
+			    && !IsObjectAtPosition(testPosition + Direction::East)) {
 				found = 1;
 			}
 			if (found == 0
 			    && nTrapTable[dPiece[xp - 1][yp]]
-			    && IsTileNotSolid({ xp, yp - 1 })
-			    && IsTileNotSolid({ xp, yp + 1 })
+			    && IsTileNotSolid(testPosition + Direction::NorthEast)
+			    && IsTileNotSolid(testPosition + Direction::SouthWest)
 			    && dTransVal[xp][yp - 1] == themes[i].ttval
 			    && dTransVal[xp][yp + 1] == themes[i].ttval
-			    && dObject[xp - 1][yp - 1] == 0
-			    && dObject[xp - 1][yp + 1] == 0) {
+			    && !IsObjectAtPosition(testPosition + Direction::North)
+			    && !IsObjectAtPosition(testPosition + Direction::West)) {
 				found = 2;
 			}
 		}
@@ -178,31 +167,37 @@ bool TFit_GoatShrine(int t)
 	return false;
 }
 
-bool CheckThemeObj3(int xp, int yp, int t, int f)
+bool CheckThemeObj3(Point origin, int8_t regionId, int frequency)
 {
-	for (int i = 0; i < 9; i++) {
-		if (xp + trm3x[i] < 0 || yp + trm3y[i] < 0)
+	const PointsInRectangleRange searchArea { Rectangle { origin, 1 } };
+	return std::all_of(searchArea.cbegin(), searchArea.cend(), [regionId, frequency](Point testPosition) {
+		if (!InDungeonBounds(testPosition)) {
 			return false;
-		if (nSolidTable[dPiece[xp + trm3x[i]][yp + trm3y[i]]])
+		}
+		if (IsTileSolid(testPosition)) {
 			return false;
-		if (dTransVal[xp + trm3x[i]][yp + trm3y[i]] != themes[t].ttval)
+		}
+		// If the theme object would extend into a different region then it doesn't fit.
+		if (dTransVal[testPosition.x][testPosition.y] != regionId) {
 			return false;
-		if (dObject[xp + trm3x[i]][yp + trm3y[i]] != 0)
+		}
+		if (IsObjectAtPosition(testPosition)) {
 			return false;
-		if (f != -1 && GenerateRnd(f) == 0)
+		}
+		if (frequency != -1 && GenerateRnd(frequency) == 0) {
 			return false;
-	}
-
-	return true;
+		}
+		return true;
+	});
 }
 
-bool TFit_Obj3(int t)
+bool TFit_Obj3(int8_t regionId)
 {
 	char objrnd[4] = { 4, 4, 3, 5 };
 
 	for (int yp = 1; yp < MAXDUNY - 1; yp++) {
 		for (int xp = 1; xp < MAXDUNX - 1; xp++) {
-			if (CheckThemeObj3(xp, yp, t, objrnd[leveltype - 1])) {
+			if (CheckThemeObj3({ xp, yp }, regionId, objrnd[leveltype - 1])) {
 				themex = xp;
 				themey = yp;
 				return true;
@@ -333,7 +328,7 @@ static bool SpecialThemeFit(int i, theme_id t)
 	case THEME_BRNCROSS:
 	case THEME_WEAPONRACK:
 		if (rv) {
-			rv = TFit_Obj3(i);
+			rv = TFit_Obj3(themes[i].ttval);
 		}
 		break;
 	case THEME_TREASURE:
@@ -361,7 +356,7 @@ bool CheckThemeRoom(int tv)
 		for (int i = 0; i < MAXDUNX; i++) {
 			if (dTransVal[i][j] != tv)
 				continue;
-			if ((dFlags[i][j] & BFLAG_POPULATED) != 0)
+			if (TileContainsSetPiece({ i, j }))
 				return false;
 
 			tarea++;
@@ -460,7 +455,7 @@ void HoldThemeRooms()
 		for (int y = 0; y < MAXDUNY; y++) {
 			for (int x = 0; x < MAXDUNX; x++) {
 				if (dTransVal[x][y] == v) {
-					dFlags[x][y] |= BFLAG_POPULATED;
+					dFlags[x][y] |= DungeonFlag::Populated;
 				}
 			}
 		}
@@ -487,7 +482,7 @@ void PlaceThemeMonsts(int t, int f)
 	int mtype = scattertypes[GenerateRnd(numscattypes)];
 	for (int yp = 0; yp < MAXDUNY; yp++) {
 		for (int xp = 0; xp < MAXDUNX; xp++) {
-			if (dTransVal[xp][yp] == themes[t].ttval && IsTileNotSolid({ xp, yp }) && dItem[xp][yp] == 0 && dObject[xp][yp] == 0) {
+			if (dTransVal[xp][yp] == themes[t].ttval && IsTileNotSolid({ xp, yp }) && dItem[xp][yp] == 0 && !IsObjectAtPosition({ xp, yp })) {
 				if (GenerateRnd(f) == 0) {
 					AddMonster({ xp, yp }, static_cast<Direction>(GenerateRnd(8)), mtype, true);
 				}
@@ -641,10 +636,10 @@ void Theme_SkelRoom(int t)
 		AddObject(OBJ_BANNERL, { xp + 1, yp + 1 });
 	}
 
-	if (dObject[xp][yp - 3] == 0) {
+	if (!IsObjectAtPosition({ xp, yp - 3 })) {
 		AddObject(OBJ_SKELBOOK, { xp, yp - 2 });
 	}
-	if (dObject[xp][yp + 3] == 0) {
+	if (!IsObjectAtPosition({ xp, yp + 3 })) {
 		AddObject(OBJ_SKELBOOK, { xp, yp + 2 });
 	}
 }
@@ -656,16 +651,17 @@ void Theme_SkelRoom(int t)
  */
 void Theme_Treasure(int t)
 {
-	char treasrnd[4] = { 4, 9, 7, 10 };
-	char monstrnd[4] = { 6, 8, 3, 7 };
+	int8_t treasrnd[4] = { 4, 9, 7, 10 };
+	int8_t monstrnd[4] = { 6, 8, 3, 7 };
 
 	AdvanceRndSeed();
 	for (int yp = 0; yp < MAXDUNY; yp++) {
 		for (int xp = 0; xp < MAXDUNX; xp++) {
 			if (dTransVal[xp][yp] == themes[t].ttval && IsTileNotSolid({ xp, yp })) {
-				int rv = GenerateRnd(treasrnd[leveltype - 1]);
+				int8_t treasureType = treasrnd[leveltype - 1];
+				int rv = GenerateRnd(treasureType);
 				// BUGFIX: the `2*` in `2*GenerateRnd(treasrnd...) == 0` has no effect, should probably be `GenerateRnd(2*treasrnd...) == 0`
-				if ((2 * GenerateRnd(treasrnd[leveltype - 1])) == 0) {
+				if ((2 * GenerateRnd(treasureType)) == 0) {
 					CreateTypeItem({ xp, yp }, false, ItemType::Gold, IMISC_NONE, false, true);
 					ItemNoFlippy();
 				}
@@ -673,10 +669,10 @@ void Theme_Treasure(int t)
 					CreateRndItem({ xp, yp }, false, false, true);
 					ItemNoFlippy();
 				}
-				if (rv == 0 || rv >= treasrnd[leveltype - 1] - 2) {
-					int i = ItemNoFlippy();
-					if (rv >= treasrnd[leveltype - 1] - 2 && leveltype != DTYPE_CATHEDRAL) {
-						Items[i]._ivalue /= 2;
+				if (rv >= treasureType - 2 && leveltype != DTYPE_CATHEDRAL) {
+					Item &item = Items[ActiveItems[ActiveItemCount - 1]];
+					if (item.IDidx == IDI_GOLD) {
+						item._ivalue = std::max(item._ivalue / 2, 1);
 					}
 				}
 			}
@@ -709,12 +705,14 @@ void Theme_Library(int t)
 
 	for (int yp = 1; yp < MAXDUNY - 1; yp++) {
 		for (int xp = 1; xp < MAXDUNX - 1; xp++) {
-			if (CheckThemeObj3(xp, yp, t, -1) && dMonster[xp][yp] == 0 && GenerateRnd(librnd[leveltype - 1]) == 0) {
+			if (CheckThemeObj3({ xp, yp }, themes[t].ttval, -1) && dMonster[xp][yp] == 0 && GenerateRnd(librnd[leveltype - 1]) == 0) {
 				AddObject(OBJ_BOOKSTAND, { xp, yp });
-				if (GenerateRnd(2 * librnd[leveltype - 1]) != 0 && dObject[xp][yp] != 0) { /// BUGFIX: check dObject[xp][yp] was populated by AddObject (fixed)
-					int oi = dObject[xp][yp] - 1;
-					Objects[oi]._oSelFlag = 0;
-					Objects[oi]._oAnimFrame += 2;
+				if (GenerateRnd(2 * librnd[leveltype - 1]) != 0) {
+					Object *bookstand = ObjectAtPosition({ xp, yp });
+					if (bookstand != nullptr) {
+						bookstand->_oSelFlag = 0;
+						bookstand->_oAnimFrame += 2;
+					}
 				}
 			}
 		}
@@ -743,7 +741,7 @@ void Theme_Torture(int t)
 	for (int yp = 1; yp < MAXDUNY - 1; yp++) {
 		for (int xp = 1; xp < MAXDUNX - 1; xp++) {
 			if (dTransVal[xp][yp] == themes[t].ttval && IsTileNotSolid({ xp, yp })) {
-				if (CheckThemeObj3(xp, yp, t, -1)) {
+				if (CheckThemeObj3({ xp, yp }, themes[t].ttval, -1)) {
 					if (GenerateRnd(tortrnd[leveltype - 1]) == 0) {
 						AddObject(OBJ_TNUDEM2, { xp, yp });
 					}
@@ -780,7 +778,7 @@ void Theme_Decap(int t)
 	for (int yp = 1; yp < MAXDUNY - 1; yp++) {
 		for (int xp = 1; xp < MAXDUNX - 1; xp++) {
 			if (dTransVal[xp][yp] == themes[t].ttval && IsTileNotSolid({ xp, yp })) {
-				if (CheckThemeObj3(xp, yp, t, -1)) {
+				if (CheckThemeObj3({ xp, yp }, themes[t].ttval, -1)) {
 					if (GenerateRnd(decaprnd[leveltype - 1]) == 0) {
 						AddObject(OBJ_DECAP, { xp, yp });
 					}
@@ -816,13 +814,13 @@ void Theme_ArmorStand(int t)
 	char monstrnd[4] = { 6, 7, 3, 9 };
 
 	if (armorFlag) {
-		TFit_Obj3(t);
+		TFit_Obj3(themes[t].ttval);
 		AddObject(OBJ_ARMORSTAND, { themex, themey });
 	}
 	for (int yp = 0; yp < MAXDUNY; yp++) {
 		for (int xp = 0; xp < MAXDUNX; xp++) {
 			if (dTransVal[xp][yp] == themes[t].ttval && IsTileNotSolid({ xp, yp })) {
-				if (CheckThemeObj3(xp, yp, t, -1)) {
+				if (CheckThemeObj3({ xp, yp }, themes[t].ttval, -1)) {
 					if (GenerateRnd(armorrnd[leveltype - 1]) == 0) {
 						AddObject(OBJ_ARMORSTANDN, { xp, yp });
 					}
@@ -901,13 +899,14 @@ void Theme_TearFountain(int t)
  */
 void Theme_BrnCross(int t)
 {
+	int8_t regionId = themes[t].ttval;
 	char monstrnd[4] = { 6, 8, 3, 9 };
 	char bcrossrnd[4] = { 5, 7, 3, 8 };
 
 	for (int yp = 0; yp < MAXDUNY; yp++) {
 		for (int xp = 0; xp < MAXDUNX; xp++) {
-			if (dTransVal[xp][yp] == themes[t].ttval && IsTileNotSolid({ xp, yp })) {
-				if (CheckThemeObj3(xp, yp, t, -1)) {
+			if (dTransVal[xp][yp] == regionId && IsTileNotSolid({ xp, yp })) {
+				if (CheckThemeObj3({ xp, yp }, regionId, -1)) {
 					if (GenerateRnd(bcrossrnd[leveltype - 1]) == 0) {
 						AddObject(OBJ_TBCROSS, { xp, yp });
 					}
@@ -925,17 +924,18 @@ void Theme_BrnCross(int t)
  */
 void Theme_WeaponRack(int t)
 {
+	int8_t regionId = themes[t].ttval;
 	char weaponrnd[4] = { 6, 8, 5, 8 };
 	char monstrnd[4] = { 6, 7, 3, 9 };
 
 	if (weaponFlag) {
-		TFit_Obj3(t);
+		TFit_Obj3(regionId);
 		AddObject(OBJ_WEAPONRACK, { themex, themey });
 	}
 	for (int yp = 0; yp < MAXDUNY; yp++) {
 		for (int xp = 0; xp < MAXDUNX; xp++) {
-			if (dTransVal[xp][yp] == themes[t].ttval && IsTileNotSolid({ xp, yp })) {
-				if (CheckThemeObj3(xp, yp, t, -1)) {
+			if (dTransVal[xp][yp] == regionId && IsTileNotSolid({ xp, yp })) {
+				if (CheckThemeObj3({ xp, yp }, regionId, -1)) {
 					if (GenerateRnd(weaponrnd[leveltype - 1]) == 0) {
 						AddObject(OBJ_WEAPONRACKN, { xp, yp });
 					}

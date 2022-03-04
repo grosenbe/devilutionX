@@ -48,7 +48,7 @@ void InitCorpses()
 	nd++; // Unused blood spatter
 
 	for (auto &corpse : Corpses[nd].data)
-		corpse = MissileSpriteData[MFILE_SHATTER1].animData[0].get();
+		corpse = MissileSpriteData[MFILE_SHATTER1].GetFirstFrame();
 
 	Corpses[nd].frame = 12;
 	Corpses[nd].width = 128;
@@ -61,7 +61,7 @@ void InitCorpses()
 		auto &monster = Monsters[ActiveMonsters[i]];
 		if (monster._uniqtype != 0) {
 			InitDeadAnimationFromMonster(Corpses[nd], *monster.MType);
-			Corpses[nd].translationPaletteIndex = monster._uniqtrans + 4;
+			Corpses[nd].translationPaletteIndex = ActiveMonsters[i] + 1;
 			nd++;
 
 			monster._udeadval = nd;

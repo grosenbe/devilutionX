@@ -1,21 +1,15 @@
-/**
- * @file animationinfo.h
- *
- * Contains most of the the demomode specific logic
- */
-
 #include <deque>
 #include <fstream>
-#include <sstream>
 #include <iostream>
+#include <sstream>
 
 #include "demomode.h"
+#include "menu.h"
+#include "nthread.h"
+#include "options.h"
+#include "pfile.h"
 #include "utils/display.h"
 #include "utils/paths.h"
-#include "menu.h"
-#include "options.h"
-#include "nthread.h"
-#include "pfile.h"
 
 namespace devilution {
 
@@ -144,15 +138,17 @@ void InitRecording(int recordNumber)
 }
 void OverrideOptions()
 {
-	sgOptions.Graphics.nWidth = DemoGraphicsWidth;
-	sgOptions.Graphics.nHeight = DemoGraphicsHeight;
-	sgOptions.Graphics.bFitToScreen = false;
+#ifndef USE_SDL1
+	sgOptions.Graphics.fitToScreen.SetValue(false);
+#endif
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-	sgOptions.Graphics.bHardwareCursor = false;
+	sgOptions.Graphics.hardwareCursor.SetValue(false);
 #endif
 	if (Timedemo) {
-		sgOptions.Graphics.bVSync = false;
-		sgOptions.Graphics.bFPSLimit = false;
+#ifndef USE_SDL1
+		sgOptions.Graphics.vSync.SetValue(false);
+#endif
+		sgOptions.Graphics.limitFPS.SetValue(false);
 	}
 }
 
@@ -222,12 +218,12 @@ bool FetchMessage(tagMSG *lpMsg)
 		}
 		if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_KP_PLUS && sgGameInitInfo.nTickRate < 255) {
 			sgGameInitInfo.nTickRate++;
-			sgOptions.Gameplay.nTickRate = sgGameInitInfo.nTickRate;
+			sgOptions.Gameplay.tickRate.SetValue(sgGameInitInfo.nTickRate);
 			gnTickDelay = 1000 / sgGameInitInfo.nTickRate;
 		}
 		if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_KP_MINUS && sgGameInitInfo.nTickRate > 1) {
 			sgGameInitInfo.nTickRate--;
-			sgOptions.Gameplay.nTickRate = sgGameInitInfo.nTickRate;
+			sgOptions.Gameplay.tickRate.SetValue(sgGameInitInfo.nTickRate);
 			gnTickDelay = 1000 / sgGameInitInfo.nTickRate;
 		}
 	}

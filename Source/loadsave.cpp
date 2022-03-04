@@ -7,6 +7,8 @@
 
 #include <climits>
 #include <cstring>
+#include <numeric>
+#include <unordered_map>
 
 #include <SDL.h>
 
@@ -23,7 +25,7 @@
 #include "inv.h"
 #include "lighting.h"
 #include "missiles.h"
-#include "mpqapi.h"
+#include "mpq/mpq_writer.hpp"
 #include "pfile.h"
 #include "stores.h"
 #include "utils/endian.hpp"
@@ -35,6 +37,8 @@ bool gbIsHellfireSaveGame;
 uint8_t giNumberOfLevels;
 
 namespace {
+
+constexpr size_t MaxMissilesForSaveGame = 125;
 
 uint8_t giNumberQuests;
 uint8_t giNumberOfSmithPremiumItems;
@@ -101,9 +105,9 @@ public:
 	}
 
 	template <typename T>
-	constexpr void Skip()
+	constexpr void Skip(size_t count = 1)
 	{
-		Skip(sizeof(T));
+		Skip(sizeof(T) * count);
 	}
 
 	void Skip(size_t size)
@@ -164,9 +168,9 @@ public:
 	}
 
 	template <typename T>
-	constexpr void Skip()
+	constexpr void Skip(size_t count = 1)
 	{
-		Skip(sizeof(T));
+		Skip(sizeof(T) * count);
 	}
 
 	void Skip(size_t len)
@@ -203,7 +207,7 @@ public:
 		const auto encodedLen = codec_get_encoded_len(m_cur_);
 		const char *const password = pfile_get_password();
 		codec_encode(m_buffer_.get(), m_cur_, encodedLen, password);
-		mpqapi_write_file(m_szFileName_, m_buffer_.get(), encodedLen);
+		CurrentSaveArchive().WriteFile(m_szFileName_, m_buffer_.get(), encodedLen);
 	}
 };
 
@@ -309,9 +313,9 @@ void LoadPlayer(LoadHelper &file, Player &player)
 	player.destAction = static_cast<action_id>(file.NextLE<int32_t>());
 	player.destParam1 = file.NextLE<int32_t>();
 	player.destParam2 = file.NextLE<int32_t>();
-	player.destParam3 = static_cast<Direction>(file.NextLE<int32_t>());
+	player.destParam3 = file.NextLE<int32_t>();
 	player.destParam4 = file.NextLE<int32_t>();
-	player.plrlevel = file.NextLE<int32_t>();
+	player.plrlevel = file.NextLE<uint32_t>();
 	player.position.tile.x = file.NextLE<int32_t>();
 	player.position.tile.y = file.NextLE<int32_t>();
 	player.position.future.x = file.NextLE<int32_t>();
@@ -416,7 +420,7 @@ void LoadPlayer(LoadHelper &file, Player &player)
 	player.position.temp.y = file.NextLE<int32_t>();
 	player.tempDirection = static_cast<Direction>(file.NextLE<int32_t>());
 	player.spellLevel = file.NextLE<int32_t>();
-	file.Skip(4); // skip _pVar5, was used for storing position of a tile which should have its BFLAG_PLAYERLR flag removed after walking
+	file.Skip(4); // skip _pVar5, was used for storing position of a tile which should have its HorizontalMovingPlayer flag removed after walking
 	player.position.offset2.deltaX = file.NextLE<int32_t>();
 	player.position.offset2.deltaY = file.NextLE<int32_t>();
 	file.Skip(4); // Skip actionFrame
@@ -625,8 +629,13 @@ void LoadMonster(LoadHelper *file, Monster &monster)
 	monster.leaderRelation = static_cast<LeaderRelation>(file->NextLE<uint8_t>());
 	monster.packsize = file->NextLE<uint8_t>();
 	monster.mlid = file->NextLE<int8_t>();
-	if (monster.mlid == Players[MyPlayerId]._plid)
+	if (monster.mlid == 0)
 		monster.mlid = NO_LIGHT; // Correct incorect values in old saves
+
+	if ((monster._mFlags & MFLAG_BERSERK) != 0) {
+		int lightRadius = (currlevel < 17 || currlevel > 20) ? 3 : 9;
+		monster.mlid = AddLight(monster.position.tile, lightRadius);
+	}
 
 	// Omit pointer mName;
 	// Omit pointer MType;
@@ -638,8 +647,28 @@ void LoadMonster(LoadHelper *file, Monster &monster)
 	SyncMonsterAnim(monster);
 }
 
-void LoadMissile(LoadHelper *file, Missile &missile)
+/**
+ * @brief Recalculate the pack size of monster group that may have underflown
+ */
+void SyncPackSize(Monster &leader)
 {
+	if (leader._uniqtype == 0)
+		return;
+	if (leader._mAi != AI_SCAV)
+		return;
+
+	leader.packsize = 0;
+
+	for (int i = 0; i < ActiveMonsterCount; i++) {
+		auto &minion = Monsters[ActiveMonsters[i]];
+		if (minion.leaderRelation == LeaderRelation::Leashed && &Monsters[minion.leader] == &leader)
+			leader.packsize++;
+	}
+}
+
+void LoadMissile(LoadHelper *file)
+{
+	Missile missile = {};
 	missile._mitype = static_cast<missile_id>(file->NextLE<int32_t>());
 	missile.position.tile.x = file->NextLE<int32_t>();
 	missile.position.tile.y = file->NextLE<int32_t>();
@@ -686,6 +715,9 @@ void LoadMissile(LoadHelper *file, Missile &missile)
 	missile.var7 = file->NextLE<int32_t>();
 	missile.limitReached = file->NextBool32();
 	missile.lastCollisionTargetHash = 0;
+	if (Missiles.size() < Missiles.max_size()) {
+		Missiles.push_back(missile);
+	}
 }
 
 void LoadObject(LoadHelper &file, Object &object)
@@ -861,14 +893,31 @@ void LoadMatchingItems(LoadHelper &file, const int n, Item *pItem)
 	}
 }
 
-void RemoveEmptyLevelItems()
+/**
+ * @brief Loads items on the current dungeon floor
+ * @param file interface to the save file
+ * @param savedItemCount how many items to read from the save file
+ */
+void LoadDroppedItems(LoadHelper &file, size_t savedItemCount)
 {
-	for (int i = ActiveItemCount; i > 0; i--) {
-		int ii = ActiveItems[i];
-		auto &item = Items[ii];
-		if (item.isEmpty()) {
-			dItem[item.position.x][item.position.y] = 0;
-			DeleteItem(ii, i);
+	// Skip loading ActiveItems and AvailableItems, the indices are initialised below based on the number of valid items
+	file.Skip<uint8_t>(MAXITEMS * 2);
+
+	// Reset ActiveItems, the Items array will be populated from the start
+	std::iota(ActiveItems, ActiveItems + MAXITEMS, 0);
+	ActiveItemCount = 0;
+	// Clear dItem so we can populate valid drop locations
+	memset(dItem, 0, sizeof(dItem));
+
+	for (size_t i = 0; i < savedItemCount; i++) {
+		Item &item = Items[ActiveItemCount];
+		LoadItem(file, item);
+
+		if (!item.isEmpty()) {
+			// Loaded a valid item
+			ActiveItemCount++;
+			// populate its location in the lookup table with the offset in the Items array + 1 (so 0 can be used for "no item")
+			dItem[item.position.x][item.position.y] = ActiveItemCount;
 		}
 	}
 }
@@ -978,7 +1027,7 @@ void SavePlayer(SaveHelper &file, const Player &player)
 	file.WriteLE<int32_t>(player.destParam2);
 	file.WriteLE<int32_t>(static_cast<int32_t>(player.destParam3));
 	file.WriteLE<int32_t>(player.destParam4);
-	file.WriteLE<int32_t>(player.plrlevel);
+	file.WriteLE<uint32_t>(player.plrlevel);
 	file.WriteLE<int32_t>(player.position.tile.x);
 	file.WriteLE<int32_t>(player.position.tile.y);
 	file.WriteLE<int32_t>(player.position.future.x);
@@ -1091,7 +1140,7 @@ void SavePlayer(SaveHelper &file, const Player &player)
 	file.WriteLE<int32_t>(player.position.temp.y);
 	file.WriteLE<int32_t>(static_cast<int32_t>(player.tempDirection));
 	file.WriteLE<int32_t>(player.spellLevel);
-	file.Skip<int32_t>(); // skip _pVar5, was used for storing position of a tile which should have its BFLAG_PLAYERLR flag removed after walking
+	file.Skip<int32_t>(); // skip _pVar5, was used for storing position of a tile which should have its HorizontalMovingPlayer flag removed after walking
 	file.WriteLE<int32_t>(player.position.offset2.deltaX);
 	file.WriteLE<int32_t>(player.position.offset2.deltaY);
 	file.Skip<int32_t>(); // Skip _pVar8
@@ -1281,14 +1330,18 @@ void SaveMonster(SaveHelper *file, Monster &monster)
 	file->WriteLE<uint8_t>(monster.leader);
 	file->WriteLE<uint8_t>(static_cast<std::uint8_t>(monster.leaderRelation));
 	file->WriteLE<uint8_t>(monster.packsize);
-	file->WriteLE<int8_t>(monster.mlid);
+	// vanilla compatibility
+	if (monster.mlid == NO_LIGHT)
+		file->WriteLE<int8_t>(0);
+	else
+		file->WriteLE<int8_t>(monster.mlid);
 
 	// Omit pointer mName;
 	// Omit pointer MType;
 	// Omit pointer MData;
 }
 
-void SaveMissile(SaveHelper *file, Missile &missile)
+void SaveMissile(SaveHelper *file, const Missile &missile)
 {
 	file->WriteLE<int32_t>(missile._mitype);
 	file->WriteLE<int32_t>(missile.position.tile.x);
@@ -1433,6 +1486,82 @@ void SavePortal(SaveHelper *file, int i)
 	file->WriteLE<int32_t>(pPortal->level);
 	file->WriteLE<int32_t>(pPortal->ltype);
 	file->WriteLE<uint32_t>(pPortal->setlvl ? 1 : 0);
+}
+
+/**
+ * @brief Saves items on the current dungeon floor
+ * @param file interface to the save file
+ * @return a map converting from runtime item indexes to the relative position in the save file, used by SaveDroppedItemLocations
+ * @see SaveDroppedItemLocations
+ */
+std::unordered_map<uint8_t, uint8_t> SaveDroppedItems(SaveHelper &file)
+{
+	// Vanilla Diablo/Hellfire initialise the ActiveItems and AvailableItems arrays based on saved data, so write valid values for compatibility
+	for (uint8_t i = 0; i < MAXITEMS; i++)
+		file.WriteLE<uint8_t>(i); // Strictly speaking everything from ActiveItemCount onwards is unused but no harm writing non-zero values here.
+	for (uint8_t i = 0; i < MAXITEMS; i++)
+		file.WriteLE<uint8_t>((i + ActiveItemCount) % MAXITEMS);
+
+	std::unordered_map<uint8_t, uint8_t> itemIndexes = { { 0, 0 } };
+	for (uint8_t i = 0; i < ActiveItemCount; i++) {
+		itemIndexes[ActiveItems[i] + 1] = i + 1;
+		SaveItem(file, Items[ActiveItems[i]]);
+	}
+	return itemIndexes;
+}
+
+/**
+ * @brief Saves the position of dropped items (in dItem)
+ * @param file interface to the save file
+ * @param indexMap a map converting from runtime item indexes to the relative position in the save file
+ */
+void SaveDroppedItemLocations(SaveHelper &file, const std::unordered_map<uint8_t, uint8_t> &itemIndexes)
+{
+	for (int j = 0; j < MAXDUNY; j++) {
+		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
+			file.WriteLE<uint8_t>(itemIndexes.at(dItem[i][j]));
+	}
+}
+
+constexpr uint32_t VersionAdditionalMissiles = 0;
+
+void SaveAdditionalMissiles()
+{
+	constexpr size_t BytesWrittenBySaveMissile = 180;
+	size_t missileCountAdditional = (Missiles.size() > MaxMissilesForSaveGame) ? Missiles.size() - MaxMissilesForSaveGame : 0;
+	SaveHelper file("additionalMissiles", sizeof(uint32_t) + sizeof(uint32_t) + (missileCountAdditional * BytesWrittenBySaveMissile));
+
+	file.WriteLE<uint32_t>(VersionAdditionalMissiles);
+	file.WriteLE<uint32_t>(missileCountAdditional);
+
+	if (missileCountAdditional > 0) {
+		auto it = Missiles.cbegin();
+		// std::list::const_iterator doesn't provide operator+() :/ using std::advance to get past the missiles we've already saved
+		std::advance(it, MaxMissilesForSaveGame);
+		for (; it != Missiles.cend(); it++) {
+			SaveMissile(&file, *it);
+		}
+	}
+}
+
+void LoadAdditionalMissiles()
+{
+	LoadHelper file("additionalMissiles");
+
+	if (!file.IsValid()) {
+		// no addtional Missiles saved
+		return;
+	}
+
+	auto loadedVersion = file.NextLE<uint32_t>();
+	if (loadedVersion > VersionAdditionalMissiles) {
+		// unknown version
+		return;
+	}
+	auto missileCountAdditional = file.NextLE<uint32_t>();
+	for (uint32_t i = 0U; i < missileCountAdditional; i++) {
+		LoadMissile(&file);
+	}
 }
 
 const int DiabloItemSaveSize = 368;
@@ -1649,7 +1778,6 @@ void RemoveEmptyInventory(Player &player)
 void LoadGame(bool firstflag)
 {
 	FreeGameMem();
-	pfile_remove_temp_files();
 
 	LoadHelper file("game");
 	if (!file.IsValid())
@@ -1669,6 +1797,8 @@ void LoadGame(bool firstflag)
 		giNumberOfSmithPremiumItems = 6;
 	}
 
+	pfile_remove_temp_files();
+
 	setlevel = file.NextBool8();
 	setlvlnum = static_cast<_setlevels>(file.NextBE<uint32_t>());
 	currlevel = file.NextBE<uint32_t>();
@@ -1680,7 +1810,7 @@ void LoadGame(bool firstflag)
 	invflag = file.NextBool8();
 	chrflag = file.NextBool8();
 	int tmpNummonsters = file.NextBE<int32_t>();
-	int tmpNumitems = file.NextBE<int32_t>();
+	auto savedItemCount = file.NextBE<uint32_t>();
 	int tmpNummissiles = file.NextBE<int32_t>();
 	int tmpNobjects = file.NextBE<int32_t>();
 
@@ -1716,8 +1846,6 @@ void LoadGame(bool firstflag)
 
 	ViewPosition = { viewX, viewY };
 	ActiveMonsterCount = tmpNummonsters;
-	ActiveItemCount = tmpNumitems;
-	ActiveMissileCount = tmpNummissiles;
 	ActiveObjectCount = tmpNobjects;
 
 	for (int &monstkill : MonsterKillCounts)
@@ -1728,12 +1856,14 @@ void LoadGame(bool firstflag)
 			monsterId = file.NextBE<int32_t>();
 		for (int i = 0; i < ActiveMonsterCount; i++)
 			LoadMonster(&file, Monsters[ActiveMonsters[i]]);
-		for (int &missileId : ActiveMissiles)
-			missileId = file.NextLE<int8_t>();
-		for (int &missileId : AvailableMissiles)
-			missileId = file.NextLE<int8_t>();
-		for (int i = 0; i < ActiveMissileCount; i++)
-			LoadMissile(&file, Missiles[ActiveMissiles[i]]);
+		for (int i = 0; i < ActiveMonsterCount; i++)
+			SyncPackSize(Monsters[ActiveMonsters[i]]);
+		// Skip ActiveMissiles
+		file.Skip<int8_t>(MaxMissilesForSaveGame);
+		// Skip AvailableMissiles
+		file.Skip<int8_t>(MaxMissilesForSaveGame);
+		for (int i = 0; i < tmpNummissiles; i++)
+			LoadMissile(&file);
 		for (int &objectId : ActiveObjects)
 			objectId = file.NextLE<int8_t>();
 		for (int &objectId : AvailableObjects)
@@ -1757,12 +1887,10 @@ void LoadGame(bool firstflag)
 			LoadLighting(&file, &VisionList[i]);
 	}
 
-	for (int &itemId : ActiveItems)
-		itemId = file.NextLE<int8_t>();
-	for (int &itemId : AvailableItems)
-		itemId = file.NextLE<int8_t>();
-	for (int i = 0; i < ActiveItemCount; i++)
-		LoadItem(file, Items[ActiveItems[i]]);
+	LoadDroppedItems(file, savedItemCount);
+
+	LoadAdditionalMissiles();
+
 	for (bool &uniqueItemFlag : UniqueItemFlags)
 		uniqueItemFlag = file.NextBool8();
 
@@ -1772,16 +1900,15 @@ void LoadGame(bool firstflag)
 	}
 	for (int j = 0; j < MAXDUNY; j++) {
 		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
-			dFlags[i][j] = file.NextLE<int8_t>() & ~(BFLAG_PLAYERLR | BFLAG_MONSTLR);
+			dFlags[i][j] = static_cast<DungeonFlag>(file.NextLE<uint8_t>()) & DungeonFlag::LoadedFlags;
 	}
 	for (int j = 0; j < MAXDUNY; j++) {
 		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
 			dPlayer[i][j] = file.NextLE<int8_t>();
 	}
-	for (int j = 0; j < MAXDUNY; j++) {
-		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
-			dItem[i][j] = file.NextLE<int8_t>();
-	}
+
+	// skip dItem indexes, this gets populated in LoadDroppedItems
+	file.Skip<uint8_t>(MAXDUNX * MAXDUNY);
 
 	if (leveltype != DTYPE_TOWN) {
 		for (int j = 0; j < MAXDUNY; j++) {
@@ -1806,7 +1933,7 @@ void LoadGame(bool firstflag)
 		}
 		for (int j = 0; j < DMAXY; j++) {
 			for (int i = 0; i < DMAXX; i++) // NOLINT(modernize-loop-convert)
-				AutomapView[i][j] = file.NextBool8();
+				AutomapView[i][j] = file.NextLE<uint8_t>();
 		}
 		file.Skip(MAXDUNX * MAXDUNY); // dMissile
 	}
@@ -1831,7 +1958,7 @@ void LoadGame(bool firstflag)
 	ProcessVisionList();
 	// convert stray manashield missiles into pManaShield flag
 	for (auto &missile : Missiles) {
-		if (missile._mitype == MIS_MANASHIELD && missile._miDelFlag == false) {
+		if (missile._mitype == MIS_MANASHIELD && !missile._miDelFlag) {
 			Players[missile._misource].pManaShield = true;
 			missile._miDelFlag = true;
 		}
@@ -1843,7 +1970,6 @@ void LoadGame(bool firstflag)
 	gbProcessPlayers = true;
 
 	if (gbIsHellfireSaveGame != gbIsHellfire) {
-		RemoveEmptyLevelItems();
 		SaveGame();
 	}
 
@@ -1865,13 +1991,9 @@ void SaveHeroItems(Player &player)
 		SaveItem(file, item);
 }
 
-// 256 kilobytes + 3 bytes (demo leftover) for file magic (262147)
-// final game uses 4-byte magic instead of 3
-#define FILEBUFF ((256 * 1024) + 3)
-
 void SaveGameData()
 {
-	SaveHelper file("game", FILEBUFF);
+	SaveHelper file("game", 320 * 1024);
 
 	if (gbIsSpawn && !gbIsHellfire)
 		file.WriteLE<uint32_t>(LoadLE32("SHAR"));
@@ -1904,7 +2026,10 @@ void SaveGameData()
 	file.WriteLE<uint8_t>(chrflag ? 1 : 0);
 	file.WriteBE<int32_t>(ActiveMonsterCount);
 	file.WriteBE<int32_t>(ActiveItemCount);
-	file.WriteBE<int32_t>(ActiveMissileCount);
+	// ActiveMissileCount will be a value from 0-125 (for vanilla compatibility). Writing an unsigned value here to avoid
+	// warnings about casting from unsigned to signed, but there's no sign extension issues when reading this as a signed
+	// value later so it doesn't have to match in LoadGameData().
+	file.WriteBE<uint32_t>(static_cast<uint32_t>(std::min(Missiles.size(), MaxMissilesForSaveGame)));
 	file.WriteBE<int32_t>(ActiveObjectCount);
 
 	for (uint8_t i = 0; i < giNumberOfLevels; i++) {
@@ -1928,16 +2053,26 @@ void SaveGameData()
 			file.WriteBE<int32_t>(monsterId);
 		for (int i = 0; i < ActiveMonsterCount; i++)
 			SaveMonster(&file, Monsters[ActiveMonsters[i]]);
-		for (int missileId : ActiveMissiles)
-			file.WriteLE<int8_t>(missileId);
-		for (int missileId : AvailableMissiles)
-			file.WriteLE<int8_t>(missileId);
-		for (int i = 0; i < ActiveMissileCount; i++)
-			SaveMissile(&file, Missiles[ActiveMissiles[i]]);
+		// Write ActiveMissiles
+		for (uint8_t activeMissile = 0; activeMissile < MaxMissilesForSaveGame; activeMissile++)
+			file.WriteLE<uint8_t>(activeMissile);
+		// Write AvailableMissiles
+		for (size_t availableMissiles = Missiles.size(); availableMissiles < MaxMissilesForSaveGame; availableMissiles++)
+			file.WriteLE(static_cast<uint8_t>(availableMissiles));
+		const size_t savedMissiles = std::min(Missiles.size(), MaxMissilesForSaveGame);
+		file.Skip<uint8_t>(savedMissiles);
+		// Write Missile Data
+		{
+			auto missilesEnd = Missiles.cbegin();
+			std::advance(missilesEnd, savedMissiles);
+			for (auto it = Missiles.cbegin(); it != missilesEnd; it++) {
+				SaveMissile(&file, *it);
+			}
+		}
 		for (int objectId : ActiveObjects)
-			file.WriteLE<int8_t>(objectId);
+			file.WriteLE(static_cast<int8_t>(objectId));
 		for (int objectId : AvailableObjects)
-			file.WriteLE<int8_t>(objectId);
+			file.WriteLE(static_cast<int8_t>(objectId));
 		for (int i = 0; i < ActiveObjectCount; i++)
 			SaveObject(file, Objects[ActiveObjects[i]]);
 
@@ -1955,12 +2090,8 @@ void SaveGameData()
 			SaveLighting(&file, &VisionList[i]);
 	}
 
-	for (int itemId : ActiveItems)
-		file.WriteLE<int8_t>(itemId);
-	for (int itemId : AvailableItems)
-		file.WriteLE<int8_t>(itemId);
-	for (int i = 0; i < ActiveItemCount; i++)
-		SaveItem(file, Items[ActiveItems[i]]);
+	auto itemIndexes = SaveDroppedItems(file);
+
 	for (bool uniqueItemFlag : UniqueItemFlags)
 		file.WriteLE<uint8_t>(uniqueItemFlag ? 1 : 0);
 
@@ -1970,16 +2101,14 @@ void SaveGameData()
 	}
 	for (int j = 0; j < MAXDUNY; j++) {
 		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
-			file.WriteLE<int8_t>(dFlags[i][j] & ~(BFLAG_MISSILE | BFLAG_VISIBLE | BFLAG_DEAD_PLAYER));
+			file.WriteLE<uint8_t>(static_cast<uint8_t>(dFlags[i][j] & DungeonFlag::SavedFlags));
 	}
 	for (int j = 0; j < MAXDUNY; j++) {
 		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
 			file.WriteLE<int8_t>(dPlayer[i][j]);
 	}
-	for (int j = 0; j < MAXDUNY; j++) {
-		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
-			file.WriteLE<int8_t>(dItem[i][j]);
-	}
+
+	SaveDroppedItemLocations(file, itemIndexes);
 
 	if (leveltype != DTYPE_TOWN) {
 		for (int j = 0; j < MAXDUNY; j++) {
@@ -2004,11 +2133,11 @@ void SaveGameData()
 		}
 		for (int j = 0; j < DMAXY; j++) {
 			for (int i = 0; i < DMAXX; i++) // NOLINT(modernize-loop-convert)
-				file.WriteLE<uint8_t>(AutomapView[i][j] ? 1 : 0);
+				file.WriteLE<uint8_t>(AutomapView[i][j]);
 		}
 		for (int j = 0; j < MAXDUNY; j++) {
-			for (int i = 0; i < MAXDUNX; i++)                                       // NOLINT(modernize-loop-convert)
-				file.WriteLE<int8_t>((dFlags[i][j] & BFLAG_MISSILE) != 0 ? -1 : 0); // For backwards compatability
+			for (int i = 0; i < MAXDUNX; i++)                                 // NOLINT(modernize-loop-convert)
+				file.WriteLE<int8_t>(TileContainsMissile({ i, j }) ? -1 : 0); // For backwards compatability
 		}
 	}
 
@@ -2020,6 +2149,8 @@ void SaveGameData()
 
 	file.WriteLE<uint8_t>(AutomapActive ? 1 : 0);
 	file.WriteBE<int32_t>(AutoMapScale);
+
+	SaveAdditionalMissiles();
 }
 
 void SaveGame()
@@ -2041,7 +2172,7 @@ void SaveLevel()
 
 	char szName[MAX_PATH];
 	GetTempLevelNames(szName);
-	SaveHelper file(szName, FILEBUFF);
+	SaveHelper file(szName, 256 * 1024);
 
 	if (leveltype != DTYPE_TOWN) {
 		for (int j = 0; j < MAXDUNY; j++) {
@@ -2067,22 +2198,13 @@ void SaveLevel()
 			SaveObject(file, Objects[ActiveObjects[i]]);
 	}
 
-	for (int itemId : ActiveItems)
-		file.WriteLE<int8_t>(itemId);
-	for (int itemId : AvailableItems)
-		file.WriteLE<int8_t>(itemId);
-
-	for (int i = 0; i < ActiveItemCount; i++)
-		SaveItem(file, Items[ActiveItems[i]]);
+	auto itemIndexes = SaveDroppedItems(file);
 
 	for (int j = 0; j < MAXDUNY; j++) {
 		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
-			file.WriteLE<int8_t>(dFlags[i][j] & ~(BFLAG_MISSILE | BFLAG_VISIBLE | BFLAG_DEAD_PLAYER));
+			file.WriteLE<uint8_t>(static_cast<uint8_t>(dFlags[i][j] & DungeonFlag::SavedFlags));
 	}
-	for (int j = 0; j < MAXDUNY; j++) {
-		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
-			file.WriteLE<int8_t>(dItem[i][j]);
-	}
+	SaveDroppedItemLocations(file, itemIndexes);
 
 	if (leveltype != DTYPE_TOWN) {
 		for (int j = 0; j < MAXDUNY; j++) {
@@ -2103,7 +2225,7 @@ void SaveLevel()
 		}
 		for (int j = 0; j < DMAXY; j++) {
 			for (int i = 0; i < DMAXX; i++) // NOLINT(modernize-loop-convert)
-				file.WriteLE<uint8_t>(AutomapView[i][j] ? 1 : 0);
+				file.WriteLE<uint8_t>(AutomapView[i][j]);
 		}
 	}
 
@@ -2130,7 +2252,7 @@ void LoadLevel()
 	}
 
 	ActiveMonsterCount = file.NextBE<int32_t>();
-	ActiveItemCount = file.NextBE<int32_t>();
+	auto savedItemCount = file.NextBE<uint32_t>();
 	ActiveObjectCount = file.NextBE<int32_t>();
 
 	if (leveltype != DTYPE_TOWN) {
@@ -2150,21 +2272,15 @@ void LoadLevel()
 		}
 	}
 
-	for (int &itemId : ActiveItems)
-		itemId = file.NextLE<int8_t>();
-	for (int &itemId : AvailableItems)
-		itemId = file.NextLE<int8_t>();
-	for (int i = 0; i < ActiveItemCount; i++)
-		LoadItem(file, Items[ActiveItems[i]]);
+	LoadDroppedItems(file, savedItemCount);
 
 	for (int j = 0; j < MAXDUNY; j++) {
 		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
-			dFlags[i][j] = file.NextLE<int8_t>() & ~(BFLAG_PLAYERLR | BFLAG_MONSTLR);
+			dFlags[i][j] = static_cast<DungeonFlag>(file.NextLE<uint8_t>()) & DungeonFlag::LoadedFlags;
 	}
-	for (int j = 0; j < MAXDUNY; j++) {
-		for (int i = 0; i < MAXDUNX; i++) // NOLINT(modernize-loop-convert)
-			dItem[i][j] = file.NextLE<int8_t>();
-	}
+
+	// skip dItem indexes, this gets populated in LoadDroppedItems
+	file.Skip<uint8_t>(MAXDUNX * MAXDUNY);
 
 	if (leveltype != DTYPE_TOWN) {
 		for (int j = 0; j < MAXDUNY; j++) {
@@ -2184,20 +2300,17 @@ void LoadLevel()
 				dPreLight[i][j] = file.NextLE<int8_t>();
 		}
 		for (int j = 0; j < DMAXY; j++) {
-			for (int i = 0; i < DMAXX; i++) // NOLINT(modernize-loop-convert)
-				AutomapView[i][j] = file.NextBool8();
+			for (int i = 0; i < DMAXX; i++) { // NOLINT(modernize-loop-convert)
+				const auto automapView = static_cast<MapExplorationType>(file.NextLE<uint8_t>());
+				AutomapView[i][j] = automapView == MAP_EXP_OLD ? MAP_EXP_SELF : automapView;
+			}
 		}
-	}
-
-	if (gbIsHellfireSaveGame != gbIsHellfire) {
-		RemoveEmptyLevelItems();
 	}
 
 	if (!gbSkipSync) {
 		AutomapZoomReset();
 		ResyncQuests();
 		RedoMissileFlags();
-		SyncPortals();
 		UpdateLighting = true;
 	}
 

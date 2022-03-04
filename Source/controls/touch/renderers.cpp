@@ -1,5 +1,6 @@
-#include "control.h"
 #include "controls/touch/renderers.h"
+
+#include "control.h"
 #include "cursor.h"
 #include "diablo.h"
 #include "doom.h"
@@ -9,6 +10,7 @@
 #include "init.h"
 #include "inv.h"
 #include "minitext.h"
+#include "panels/ui_panels.hpp"
 #include "stores.h"
 #include "towners.h"
 #include "utils/sdl_compat.h"
@@ -45,7 +47,7 @@ VirtualGamepadButtonType GetCastButtonType(bool isPressed)
 	return isPressed ? GAMEPAD_CASTSPELLDOWN : GAMEPAD_CASTSPELL;
 }
 
-VirtualGamepadButtonType GetCancelButtonType(bool isPressed)
+VirtualGamepadButtonType GetBackButtonType(bool isPressed)
 {
 	return isPressed ? GAMEPAD_BACKDOWN : GAMEPAD_BACK;
 }
@@ -55,9 +57,39 @@ VirtualGamepadButtonType GetBlankButtonType(bool isPressed)
 	return isPressed ? GAMEPAD_BLANKDOWN : GAMEPAD_BLANK;
 }
 
+VirtualGamepadButtonType GetPotionButtonType(bool isPressed)
+{
+	return isPressed ? GAMEPAD_POTIONDOWN : GAMEPAD_POTION;
+}
+
+VirtualGamepadButtonType GetApplyButtonType(bool isPressed)
+{
+	return isPressed ? GAMEPAD_APPLYDOWN : GAMEPAD_APPLY;
+}
+
+VirtualGamepadButtonType GetEquipButtonType(bool isPressed)
+{
+	return isPressed ? GAMEPAD_EQUIPDOWN : GAMEPAD_EQUIP;
+}
+
+VirtualGamepadButtonType GetDropButtonType(bool isPressed)
+{
+	return isPressed ? GAMEPAD_DROPDOWN : GAMEPAD_DROP;
+}
+
+VirtualGamepadButtonType GetStairsButtonType(bool isPressed)
+{
+	return isPressed ? GAMEPAD_STAIRSDOWN : GAMEPAD_STAIRS;
+}
+
+VirtualGamepadButtonType GetStandButtonType(bool isPressed)
+{
+	return isPressed ? GAMEPAD_STANDDOWN : GAMEPAD_STAND;
+}
+
 void LoadButtonArt(Art *buttonArt, SDL_Renderer *renderer)
 {
-	const int Frames = 14;
+	const int Frames = 26;
 	buttonArt->surface.reset(LoadPNG("ui_art\\button.png"));
 	if (buttonArt->surface == nullptr)
 		return;
@@ -124,6 +156,24 @@ void LoadPotionArt(Art *potionArt, SDL_Renderer *renderer)
 	}
 }
 
+bool InteractsWithCharButton(Point point)
+{
+	auto &myPlayer = Players[MyPlayerId];
+	if (myPlayer._pStatPts == 0)
+		return false;
+	for (auto attribute : enum_values<CharacterAttribute>()) {
+		if (myPlayer.GetBaseAttributeValue(attribute) >= myPlayer.GetMaximumAttributeValue(attribute))
+			continue;
+		auto buttonId = static_cast<size_t>(attribute);
+		Rectangle button = ChrBtnsRect[buttonId];
+		button.position = GetPanelPosition(UiPanels::Character, button.position);
+		if (button.Contains(point)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 } // namespace
 
 void RenderVirtualGamepad(SDL_Renderer *renderer)
@@ -160,9 +210,23 @@ void RenderVirtualGamepad(SDL_Surface *surface)
 
 void VirtualGamepadRenderer::LoadArt(SDL_Renderer *renderer)
 {
+	menuPanelRenderer.LoadArt(renderer);
 	directionPadRenderer.LoadArt(renderer);
 	LoadButtonArt(&buttonArt, renderer);
 	LoadPotionArt(&potionArt, renderer);
+}
+
+void VirtualMenuPanelRenderer::LoadArt(SDL_Renderer *renderer)
+{
+	menuArt.surface.reset(LoadPNG("ui_art\\menu.png"));
+	menuArtLevelUp.surface.reset(LoadPNG("ui_art\\menu-levelup.png"));
+
+	if (renderer != nullptr) {
+		menuArt.texture.reset(SDL_CreateTextureFromSurface(renderer, menuArt.surface.get()));
+		menuArt.surface = nullptr;
+		menuArtLevelUp.texture.reset(SDL_CreateTextureFromSurface(renderer, menuArtLevelUp.surface.get()));
+		menuArtLevelUp.surface = nullptr;
+	}
 }
 
 void VirtualDirectionPadRenderer::LoadArt(SDL_Renderer *renderer)
@@ -184,8 +248,6 @@ void VirtualGamepadRenderer::Render(RenderFunction renderFunction)
 	if (CurrentProc == DisableInputWndProc)
 		return;
 
-	directionPadRenderer.Render(renderFunction);
-
 	primaryActionButtonRenderer.Render(renderFunction, buttonArt);
 	secondaryActionButtonRenderer.Render(renderFunction, buttonArt);
 	spellActionButtonRenderer.Render(renderFunction, buttonArt);
@@ -195,6 +257,21 @@ void VirtualGamepadRenderer::Render(RenderFunction renderFunction)
 
 	healthButtonRenderer.RenderPotion(renderFunction, potionArt);
 	manaButtonRenderer.RenderPotion(renderFunction, potionArt);
+
+	if (leveltype != DTYPE_TOWN)
+		standButtonRenderer.Render(renderFunction, buttonArt);
+	directionPadRenderer.Render(renderFunction);
+	menuPanelRenderer.Render(renderFunction);
+}
+
+void VirtualMenuPanelRenderer::Render(RenderFunction renderFunction)
+{
+	int x = virtualMenuPanel->area.position.x;
+	int y = virtualMenuPanel->area.position.y;
+	int width = virtualMenuPanel->area.size.width;
+	int height = virtualMenuPanel->area.size.height;
+	SDL_Rect rect { x, y, width, height };
+	renderFunction(MyPlayer->_pStatPts == 0 ? menuArt : menuArtLevelUp, nullptr, &rect);
 }
 
 void VirtualDirectionPadRenderer::Render(RenderFunction renderFunction)
@@ -233,6 +310,9 @@ void VirtualDirectionPadRenderer::RenderKnob(RenderFunction renderFunction)
 
 void VirtualPadButtonRenderer::Render(RenderFunction renderFunction, Art &buttonArt)
 {
+	if (!virtualPadButton->isUsable())
+		return;
+
 	VirtualGamepadButtonType buttonType = GetButtonType();
 	int frame = buttonType;
 	int offset = buttonArt.h() * frame;
@@ -253,6 +333,9 @@ void VirtualPadButtonRenderer::Render(RenderFunction renderFunction, Art &button
 
 void PotionButtonRenderer::RenderPotion(RenderFunction renderFunction, Art &potionArt)
 {
+	if (!virtualPadButton->isUsable())
+		return;
+
 	std::optional<VirtualGamepadPotionType> potionType = GetPotionType();
 	if (potionType == std::nullopt)
 		return;
@@ -309,11 +392,18 @@ std::optional<VirtualGamepadPotionType> PotionButtonRenderer::GetPotionType()
 	return std::nullopt;
 }
 
+VirtualGamepadButtonType StandButtonRenderer::GetButtonType()
+{
+	return GetStandButtonType(virtualPadButton->isHeld);
+}
+
 VirtualGamepadButtonType PrimaryActionButtonRenderer::GetButtonType()
 {
 	// NEED: Confirm surface
 	if (qtextflag)
 		return GetTalkButtonType(virtualPadButton->isHeld);
+	if (chrflag && InteractsWithCharButton(MousePosition))
+		return GetApplyButtonType(virtualPadButton->isHeld);
 	if (invflag)
 		return GetInventoryButtonType();
 	if (leveltype == DTYPE_TOWN)
@@ -345,21 +435,55 @@ VirtualGamepadButtonType PrimaryActionButtonRenderer::GetInventoryButtonType()
 	return GetBlankButtonType(virtualPadButton->isHeld);
 }
 
+extern int pcurstrig;
+extern Missile *pcursmissile;
+extern quest_id pcursquest;
+
 VirtualGamepadButtonType SecondaryActionButtonRenderer::GetButtonType()
 {
-	// NEED: Stairs surface
+	if (pcursmissile != nullptr || pcurstrig != -1 || pcursquest != Q_INVALID) {
+		return GetStairsButtonType(virtualPadButton->isHeld);
+	}
 	if (InGameMenu() || QuestLogIsOpen || sbookflag)
 		return GetBlankButtonType(virtualPadButton->isHeld);
 	if (pcursobj != -1)
 		return GetObjectButtonType(virtualPadButton->isHeld);
 	if (pcursitem != -1)
 		return GetItemButtonType(virtualPadButton->isHeld);
+	if (invflag) {
+		if (pcurs > CURSOR_HAND && pcurs < CURSOR_FIRSTITEM)
+			return GetApplyButtonType(virtualPadButton->isHeld);
+
+		if (pcursinvitem != -1) {
+			Item *item;
+			if (pcursinvitem < INVITEM_INV_FIRST)
+				item = &MyPlayer->InvBody[pcursinvitem];
+			else if (pcursinvitem <= INVITEM_INV_LAST)
+				item = &MyPlayer->InvList[pcursinvitem - INVITEM_INV_FIRST];
+			else
+				item = &MyPlayer->SpdList[pcursinvitem - INVITEM_BELT_FIRST];
+
+			if (!item->IsScroll() || !spelldata[item->_iSpell].sTargeted) {
+				if (!item->isEquipment()) {
+					return GetApplyButtonType(virtualPadButton->isHeld);
+				}
+			}
+		}
+	}
+
 	return GetBlankButtonType(virtualPadButton->isHeld);
 }
 
 VirtualGamepadButtonType SpellActionButtonRenderer::GetButtonType()
 {
-	if (!InGameMenu() && !QuestLogIsOpen && !sbookflag)
+	if (pcurs >= CURSOR_FIRSTITEM)
+		return GetDropButtonType(virtualPadButton->isHeld);
+
+	if (invflag && pcursinvitem != -1 && pcurs == CURSOR_HAND) {
+		return GetEquipButtonType(virtualPadButton->isHeld);
+	}
+
+	if (!invflag && !InGameMenu() && !QuestLogIsOpen && !sbookflag)
 		return GetCastButtonType(virtualPadButton->isHeld);
 	return GetBlankButtonType(virtualPadButton->isHeld);
 }
@@ -367,22 +491,29 @@ VirtualGamepadButtonType SpellActionButtonRenderer::GetButtonType()
 VirtualGamepadButtonType CancelButtonRenderer::GetButtonType()
 {
 	if (InGameMenu())
-		return GetCancelButtonType(virtualPadButton->isHeld);
+		return GetBackButtonType(virtualPadButton->isHeld);
 	if (DoomFlag || invflag || sbookflag || QuestLogIsOpen || chrflag)
-		return GetCancelButtonType(virtualPadButton->isHeld);
+		return GetBackButtonType(virtualPadButton->isHeld);
 	return GetBlankButtonType(virtualPadButton->isHeld);
 }
 
 VirtualGamepadButtonType PotionButtonRenderer::GetButtonType()
 {
-	return GetBlankButtonType(virtualPadButton->isHeld);
+	return GetPotionButtonType(virtualPadButton->isHeld);
 }
 
 void VirtualGamepadRenderer::UnloadArt()
 {
+	menuPanelRenderer.UnloadArt();
 	directionPadRenderer.UnloadArt();
 	buttonArt.Unload();
 	potionArt.Unload();
+}
+
+void VirtualMenuPanelRenderer::UnloadArt()
+{
+	menuArt.Unload();
+	menuArtLevelUp.Unload();
 }
 
 void VirtualDirectionPadRenderer::UnloadArt()

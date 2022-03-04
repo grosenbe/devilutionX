@@ -7,10 +7,10 @@
 
 #include <SDL.h>
 
+#include "controls/plrctrls.h"
 #include "controls/touch/renderers.h"
 #include "engine.h"
 #include "options.h"
-#include "storm/storm.h"
 #include "utils/display.h"
 #include "utils/log.hpp"
 #include "utils/sdl_mutex.h"
@@ -68,50 +68,6 @@ bool CanRenderDirectlyToOutputSurface()
 #endif
 }
 
-void CreateBackBuffer()
-{
-	if (CanRenderDirectlyToOutputSurface()) {
-		Log("{}", "Will render directly to the SDL output surface");
-		PalSurface = GetOutputSurface();
-		RenderDirectlyToOutputSurface = true;
-	} else {
-		PinnedPalSurface = SDLWrap::CreateRGBSurfaceWithFormat(
-		    /*flags=*/0,
-		    /*width=*/gnScreenWidth,
-		    /*height=*/gnScreenHeight,
-		    /*depth=*/8,
-		    SDL_PIXELFORMAT_INDEX8);
-		PalSurface = PinnedPalSurface.get();
-	}
-
-#ifndef USE_SDL1
-	// In SDL2, `PalSurface` points to the global `palette`.
-	if (SDL_SetSurfacePalette(PalSurface, Palette.get()) < 0)
-		ErrSdl();
-#else
-	// In SDL1, `PalSurface` owns its palette and we must update it every
-	// time the global `palette` is changed. No need to do anything here as
-	// the global `palette` doesn't have any colors set yet.
-#endif
-
-	pal_surface_palette_version = 1;
-}
-
-void CreatePrimarySurface()
-{
-#ifndef USE_SDL1
-	if (renderer != nullptr) {
-		int width = 0;
-		int height = 0;
-		SDL_RenderGetLogicalSize(renderer, &width, &height);
-		Uint32 format;
-		if (SDL_QueryTexture(texture.get(), &format, nullptr, nullptr, nullptr) < 0)
-			ErrSdl();
-		RendererTextureSurface = SDLWrap::CreateRGBSurfaceWithFormat(0, width, height, SDL_BITSPERPIXEL(format), format);
-	}
-#endif
-}
-
 void LockBufPriv()
 {
 	MemCrit.lock();
@@ -137,7 +93,7 @@ void UnlockBufPriv()
  */
 void LimitFrameRate()
 {
-	if (!sgOptions.Graphics.bFPSLimit)
+	if (!*sgOptions.Graphics.limitFPS)
 		return;
 	static uint32_t frameDeadline;
 	uint32_t tc = SDL_GetTicks() * 1000;
@@ -158,9 +114,9 @@ void dx_init()
 	SDL_ShowWindow(ghMainWnd);
 #endif
 
-	CreatePrimarySurface();
 	palette_init();
 	CreateBackBuffer();
+	pal_surface_palette_version = 1;
 }
 
 void lock_buf(int idx) // NOLINT(misc-unused-parameters)
@@ -207,33 +163,37 @@ void dx_cleanup()
 	RendererTextureSurface = nullptr;
 #ifndef USE_SDL1
 	texture = nullptr;
-	if (sgOptions.Graphics.bUpscale)
+	if (*sgOptions.Graphics.upscale)
 		SDL_DestroyRenderer(renderer);
 #endif
 	SDL_DestroyWindow(ghMainWnd);
 }
 
-void dx_reinit()
+void CreateBackBuffer()
 {
-#ifdef USE_SDL1
-	Uint32 flags = ghMainWnd->flags ^ SDL_FULLSCREEN;
-	if (!IsFullScreen()) {
-		flags |= SDL_FULLSCREEN;
+	if (CanRenderDirectlyToOutputSurface()) {
+		Log("{}", "Will render directly to the SDL output surface");
+		PalSurface = GetOutputSurface();
+		RenderDirectlyToOutputSurface = true;
+	} else {
+		PinnedPalSurface = SDLWrap::CreateRGBSurfaceWithFormat(
+		    /*flags=*/0,
+		    /*width=*/gnScreenWidth,
+		    /*height=*/gnScreenHeight,
+		    /*depth=*/8,
+		    SDL_PIXELFORMAT_INDEX8);
+		PalSurface = PinnedPalSurface.get();
 	}
-	ghMainWnd = SDL_SetVideoMode(0, 0, 0, flags);
-	if (ghMainWnd == NULL) {
+
+#ifndef USE_SDL1
+	// In SDL2, `PalSurface` points to the global `palette`.
+	if (SDL_SetSurfacePalette(PalSurface, Palette.get()) < 0)
 		ErrSdl();
-	}
 #else
-	Uint32 flags = 0;
-	if (!IsFullScreen()) {
-		flags = renderer != nullptr ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN;
-	}
-	if (SDL_SetWindowFullscreen(ghMainWnd, flags) != 0) {
-		ErrSdl();
-	}
+	// In SDL1, `PalSurface` owns its palette and we must update it every
+	// time the global `palette` is changed. No need to do anything here as
+	// the global `palette` doesn't have any colors set yet.
 #endif
-	force_redraw = 255;
 }
 
 void InitPalette()
@@ -309,7 +269,7 @@ void RenderPresent()
 
 #ifndef USE_SDL1
 	if (renderer != nullptr) {
-		if (SDL_UpdateTexture(texture.get(), nullptr, surface->pixels, surface->pitch) <= -1) { //pitch is 2560
+		if (SDL_UpdateTexture(texture.get(), nullptr, surface->pixels, surface->pitch) <= -1) { // pitch is 2560
 			ErrSdl();
 		}
 
@@ -324,18 +284,18 @@ void RenderPresent()
 		if (SDL_RenderCopy(renderer, texture.get(), nullptr, nullptr) <= -1) {
 			ErrSdl();
 		}
-#ifdef VIRTUAL_GAMEPAD
-		RenderVirtualGamepad(renderer);
-#endif
+		if (ControlMode == ControlTypes::VirtualGamepad) {
+			RenderVirtualGamepad(renderer);
+		}
 		SDL_RenderPresent(renderer);
 
-		if (!sgOptions.Graphics.bVSync) {
+		if (!*sgOptions.Graphics.vSync) {
 			LimitFrameRate();
 		}
 	} else {
-#ifdef VIRTUAL_GAMEPAD
-		RenderVirtualGamepad(surface);
-#endif
+		if (ControlMode == ControlTypes::VirtualGamepad) {
+			RenderVirtualGamepad(surface);
+		}
 		if (SDL_UpdateWindowSurface(ghMainWnd) <= -1) {
 			ErrSdl();
 		}

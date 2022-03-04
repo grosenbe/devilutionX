@@ -7,6 +7,7 @@
 
 #include <fmt/format.h>
 
+#include "DiabloUI/ui_flags.hpp"
 #include "control.h"
 #include "cursor.h"
 #include "engine/load_file.hpp"
@@ -19,6 +20,7 @@
 #include "missiles.h"
 #include "monster.h"
 #include "options.h"
+#include "panels/ui_panels.hpp"
 #include "stores.h"
 #include "towners.h"
 #include "trigs.h"
@@ -251,7 +253,7 @@ void DrawBlood(int x, int y)
 int QuestLogMouseToEntry()
 {
 	Rectangle innerArea = InnerPanel;
-	innerArea.position += Displacement(LeftPanel.position.x, LeftPanel.position.y);
+	innerArea.position += Displacement(GetLeftPanel().position.x, GetLeftPanel().position.y);
 	if (!innerArea.Contains(MousePosition) || (EncounteredQuestCount == 0))
 		return -1;
 	int y = MousePosition.y - innerArea.position.y;
@@ -308,14 +310,12 @@ void InitQuests()
 			quest._qactive = QUEST_INIT;
 		} else if (!questData.isSinglePlayerOnly) {
 			quest._qlevel = questData._qdmultlvl;
-			if (!delta_quest_inited(initiatedQuests)) {
-				quest._qactive = QUEST_INIT;
-			}
+			quest._qactive = QUEST_INIT;
 			initiatedQuests++;
 		}
 	}
 
-	if (!gbIsMultiplayer && sgOptions.Gameplay.bRandomizeQuests) {
+	if (!gbIsMultiplayer && *sgOptions.Gameplay.randomizeQuests) {
 		// Quests are set from the seed used to generate level 16.
 		InitialiseQuestPools(glSeedTbl[15], Quests);
 	}

@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <string>
 #ifdef USE_SDL1
+#include <cassert>
 #include <codecvt>
 #include <locale>
-#include <cassert>
 #endif
 
 #include "DiabloUI/art_draw.h"
@@ -13,19 +13,21 @@
 #include "DiabloUI/dialogs.h"
 #include "DiabloUI/scrollbar.h"
 #include "controls/controller.h"
+#include "controls/input.h"
 #include "controls/menu_controls.h"
+#include "controls/plrctrls.h"
+#include "discord/discord.h"
 #include "dx.h"
-#include "engine/render/text_render.hpp"
 #include "hwcursor.hpp"
 #include "palette.h"
-#include "storm/storm.h"
 #include "utils/display.h"
+#include "utils/language.h"
 #include "utils/log.hpp"
 #include "utils/sdl_compat.h"
+#include "utils/sdl_geometry.h"
 #include "utils/sdl_wrap.h"
 #include "utils/stubs.h"
-#include "utils/language.h"
-#include "utils/utf8.h"
+#include "utils/utf8.hpp"
 
 #ifdef __SWITCH__
 // for virtual keyboard on Switch
@@ -42,32 +44,34 @@
 
 namespace devilution {
 
-std::size_t SelectedItemMax;
-std::size_t ListViewportSize = 1;
-const std::size_t *ListOffset = nullptr;
-
 std::array<Art, 3> ArtLogos;
 std::array<Art, 3> ArtFocus;
 Art ArtBackgroundWidescreen;
 Art ArtBackground;
 Art ArtCursor;
 Art ArtHero;
-bool gbSpawned;
 
 void (*gfnSoundFunction)(const char *file);
-void (*gfnListFocus)(int value);
-void (*gfnListSelect)(int value);
-void (*gfnListEsc)();
-bool (*gfnListYesNo)();
-std::vector<UiItemBase *> gUiItems;
-bool UiItemsWraps;
-char *UiTextInput;
-int UiTextInputLen;
 bool textInputActive = true;
-
 std::size_t SelectedItem = 0;
 
 namespace {
+
+std::size_t SelectedItemMax;
+std::size_t ListViewportSize = 1;
+std::size_t listOffset = 0;
+
+void (*gfnListFocus)(int value);
+void (*gfnListSelect)(int value);
+void (*gfnListEsc)();
+void (*gfnFullscreen)();
+bool (*gfnListYesNo)();
+std::vector<UiItemBase *> gUiItems;
+UiList *gUiList = nullptr;
+bool UiItemsWraps;
+char *UiTextInput;
+int UiTextInputLen;
+bool allowEmptyTextInput = false;
 
 uint32_t fadeTc;
 int fadeValue = 0;
@@ -83,34 +87,45 @@ struct ScrollBarState {
 	}
 } scrollBarState;
 
+void AdjustListOffset(std::size_t itemIndex)
+{
+	if (itemIndex >= listOffset + ListViewportSize)
+		listOffset = itemIndex - (ListViewportSize - 1);
+	if (itemIndex < listOffset)
+		listOffset = itemIndex;
+}
+
 } // namespace
 
-void UiInitList(int count, void (*fnFocus)(int value), void (*fnSelect)(int value), void (*fnEsc)(), const std::vector<std::unique_ptr<UiItemBase>> &items, bool itemsWraps, bool (*fnYesNo)())
+void UiInitList(void (*fnFocus)(int value), void (*fnSelect)(int value), void (*fnEsc)(), const std::vector<std::unique_ptr<UiItemBase>> &items, bool itemsWraps, void (*fnFullscreen)(), bool (*fnYesNo)(), size_t selectedItem /*= 0*/)
 {
-	SelectedItem = 0;
-	SelectedItemMax = std::max(count - 1, 0);
-	ListViewportSize = count;
+	SelectedItem = selectedItem;
+	SelectedItemMax = 0;
+	ListViewportSize = 0;
 	gfnListFocus = fnFocus;
 	gfnListSelect = fnSelect;
 	gfnListEsc = fnEsc;
+	gfnFullscreen = fnFullscreen;
 	gfnListYesNo = fnYesNo;
 	gUiItems.clear();
 	for (const auto &item : items)
 		gUiItems.push_back(item.get());
 	UiItemsWraps = itemsWraps;
-	ListOffset = nullptr;
+	listOffset = 0;
 	if (fnFocus != nullptr)
-		fnFocus(0);
+		fnFocus(selectedItem);
 
 #ifndef __SWITCH__
 	SDL_StopTextInput(); // input is enabled by default
 #endif
 	textInputActive = false;
+	UiScrollbar *uiScrollbar = nullptr;
 	for (const auto &item : items) {
-		if (item->m_type == UiType::Edit) {
+		if (item->IsType(UiType::Edit)) {
 			auto *pItemUIEdit = static_cast<UiEdit *>(item.get());
 			SDL_SetTextInputRect(&item->m_rect);
 			textInputActive = true;
+			allowEmptyTextInput = pItemUIEdit->m_allowEmpty;
 #ifdef __SWITCH__
 			switch_start_text_input(pItemUIEdit->m_hint, pItemUIEdit->m_value, pItemUIEdit->m_max_length, /*multiline=*/0);
 #elif defined(__vita__)
@@ -122,18 +137,26 @@ void UiInitList(int count, void (*fnFocus)(int value), void (*fnSelect)(int valu
 #endif
 			UiTextInput = pItemUIEdit->m_value;
 			UiTextInputLen = pItemUIEdit->m_max_length;
+		} else if (item->IsType(UiType::List)) {
+			auto *uiList = static_cast<UiList *>(item.get());
+			SelectedItemMax = std::max(uiList->m_vecItems.size() - 1, static_cast<size_t>(0));
+			ListViewportSize = uiList->viewportSize;
+			gUiList = uiList;
+			if (selectedItem <= SelectedItemMax && HasAnyOf(uiList->GetItem(selectedItem)->uiFlags, UiFlags::NeedsNextElement))
+				AdjustListOffset(selectedItem + 1);
+		} else if (item->IsType(UiType::Scrollbar)) {
+			uiScrollbar = static_cast<UiScrollbar *>(item.get());
 		}
 	}
-}
 
-void UiInitScrollBar(UiScrollbar *uiSb, std::size_t viewportSize, const std::size_t *currentOffset)
-{
-	ListViewportSize = viewportSize;
-	ListOffset = currentOffset;
-	if (ListViewportSize >= static_cast<std::size_t>(SelectedItemMax + 1)) {
-		uiSb->add_flag(UiFlags::ElementHidden);
-	} else {
-		uiSb->remove_flag(UiFlags::ElementHidden);
+	AdjustListOffset(selectedItem);
+
+	if (uiScrollbar != nullptr) {
+		if (ListViewportSize >= static_cast<std::size_t>(SelectedItemMax + 1)) {
+			uiScrollbar->Hide();
+		} else {
+			uiScrollbar->Show();
+		}
 	}
 }
 
@@ -145,7 +168,9 @@ void UiInitList_clear()
 	gfnListFocus = nullptr;
 	gfnListSelect = nullptr;
 	gfnListEsc = nullptr;
+	gfnFullscreen = nullptr;
 	gfnListYesNo = nullptr;
+	gUiList = nullptr;
 	gUiItems.clear();
 	UiItemsWraps = false;
 }
@@ -164,10 +189,36 @@ void UiPlaySelectSound()
 
 namespace {
 
-void UiFocus(std::size_t itemIndex)
+void UiFocus(std::size_t itemIndex, bool checkUp, bool ignoreItemsWraps = false)
 {
 	if (SelectedItem == itemIndex)
 		return;
+
+	AdjustListOffset(itemIndex);
+
+	const auto *pItem = gUiList->GetItem(itemIndex);
+	while (HasAnyOf(pItem->uiFlags, UiFlags::ElementHidden | UiFlags::ElementDisabled)) {
+		if (checkUp) {
+			if (itemIndex > 0)
+				itemIndex -= 1;
+			else if (UiItemsWraps && !ignoreItemsWraps)
+				itemIndex = SelectedItemMax;
+			else
+				checkUp = false;
+		} else {
+			if (itemIndex < SelectedItemMax)
+				itemIndex += 1;
+			else if (UiItemsWraps && !ignoreItemsWraps)
+				itemIndex = 0;
+			else
+				checkUp = true;
+		}
+		pItem = gUiList->GetItem(itemIndex);
+	}
+
+	if (HasAnyOf(pItem->uiFlags, UiFlags::NeedsNextElement))
+		AdjustListOffset(itemIndex + 1);
+	AdjustListOffset(itemIndex);
 
 	SelectedItem = itemIndex;
 
@@ -180,50 +231,50 @@ void UiFocus(std::size_t itemIndex)
 void UiFocusUp()
 {
 	if (SelectedItem > 0)
-		UiFocus(SelectedItem - 1);
+		UiFocus(SelectedItem - 1, true);
 	else if (UiItemsWraps)
-		UiFocus(SelectedItemMax);
+		UiFocus(SelectedItemMax, true);
 }
 
 void UiFocusDown()
 {
 	if (SelectedItem < SelectedItemMax)
-		UiFocus(SelectedItem + 1);
+		UiFocus(SelectedItem + 1, false);
 	else if (UiItemsWraps)
-		UiFocus(0);
+		UiFocus(0, false);
 }
 
 // UiFocusPageUp/Down mimics the slightly weird behaviour of actual Diablo.
 
 void UiFocusPageUp()
 {
-	if (ListOffset == nullptr || *ListOffset == 0) {
-		UiFocus(0);
+	if (listOffset == 0) {
+		UiFocus(0, true, true);
 	} else {
-		const std::size_t relpos = SelectedItem - *ListOffset;
+		const std::size_t relpos = SelectedItem - listOffset;
 		std::size_t prevPageStart = SelectedItem - relpos;
 		if (prevPageStart >= ListViewportSize)
 			prevPageStart -= ListViewportSize;
 		else
 			prevPageStart = 0;
-		UiFocus(prevPageStart);
-		UiFocus(*ListOffset + relpos);
+		AdjustListOffset(prevPageStart);
+		UiFocus(listOffset + relpos, true, true);
 	}
 }
 
 void UiFocusPageDown()
 {
-	if (ListOffset == nullptr || *ListOffset + ListViewportSize > static_cast<std::size_t>(SelectedItemMax)) {
-		UiFocus(SelectedItemMax);
+	if (listOffset + ListViewportSize > static_cast<std::size_t>(SelectedItemMax)) {
+		UiFocus(SelectedItemMax, false, true);
 	} else {
-		const std::size_t relpos = SelectedItem - *ListOffset;
+		const std::size_t relpos = SelectedItem - listOffset;
 		std::size_t nextPageEnd = SelectedItem + (ListViewportSize - relpos - 1);
 		if (nextPageEnd + ListViewportSize <= static_cast<std::size_t>(SelectedItemMax))
 			nextPageEnd += ListViewportSize;
 		else
 			nextPageEnd = SelectedItemMax;
-		UiFocus(nextPageEnd);
-		UiFocus(*ListOffset + relpos);
+		AdjustListOffset(nextPageEnd);
+		UiFocus(listOffset + relpos, false, true);
 	}
 }
 
@@ -231,13 +282,6 @@ void SelheroCatToName(const char *inBuf, char *outBuf, int cnt)
 {
 	strncat(outBuf, inBuf, cnt - strlen(outBuf));
 }
-
-#ifdef __vita__
-void selhero_SetName(const char *in_buf, char *out_buf, int cnt)
-{
-	strncpy(out_buf, in_buf, cnt);
-}
-#endif
 
 bool HandleMenuAction(MenuAction menuAction)
 {
@@ -300,7 +344,7 @@ void UiFocusNavigation(SDL_Event *event)
 	if (HandleMenuAction(GetMenuAction(*event)))
 		return;
 
-#ifndef USE_SDL1
+#if SDL_VERSION_ATLEAST(2, 0, 0)
 	if (event->type == SDL_MOUSEWHEEL) {
 		if (event->wheel.y > 0) {
 			UiFocusUp();
@@ -308,6 +352,17 @@ void UiFocusNavigation(SDL_Event *event)
 			UiFocusDown();
 		}
 		return;
+	}
+#else
+	if (event->type == SDL_MOUSEBUTTONDOWN) {
+		switch (event->button.button) {
+		case SDL_BUTTON_WHEELUP:
+			UiFocusUp();
+			return;
+		case SDL_BUTTON_WHEELDOWN:
+			UiFocusDown();
+			return;
+		}
 	}
 #endif
 
@@ -349,7 +404,7 @@ void UiFocusNavigation(SDL_Event *event)
 		case SDL_TEXTINPUT:
 			if (textInputActive) {
 #ifdef __vita__
-				selhero_SetName(event->text.text, UiTextInput, UiTextInputLen);
+				CopyUtf8(UiTextInput, event->text.text, UiTextInputLen);
 #else
 				SelheroCatToName(event->text.text, UiTextInput, UiTextInputLen);
 #endif
@@ -380,7 +435,10 @@ void UiHandleEvents(SDL_Event *event)
 	if (event->type == SDL_KEYDOWN && event->key.keysym.sym == SDLK_RETURN) {
 		const Uint8 *state = SDLC_GetKeyState();
 		if (state[SDLC_KEYSTATE_LALT] != 0 || state[SDLC_KEYSTATE_RALT] != 0) {
-			dx_reinit();
+			sgOptions.Graphics.fullscreen.SetValue(!IsFullScreen());
+			SaveOptions();
+			if (gfnFullscreen != nullptr)
+				gfnFullscreen();
 			return;
 		}
 	}
@@ -401,8 +459,15 @@ void UiHandleEvents(SDL_Event *event)
 		} else if (event->window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
 			music_mute();
 		} else if (event->window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
-			music_unmute();
+			diablo_focus_unpause();
 		}
+	}
+#else
+	if (event->type == SDL_ACTIVEEVENT && (event->active.state & SDL_APPINPUTFOCUS) != 0) {
+		if (event->active.gain == 0)
+			music_mute();
+		else
+			diablo_focus_unpause();
 	}
 #endif
 }
@@ -411,7 +476,7 @@ void UiFocusNavigationSelect()
 {
 	UiPlaySelectSound();
 	if (textInputActive) {
-		if (strlen(UiTextInput) == 0) {
+		if (!allowEmptyTextInput && strlen(UiTextInput) == 0) {
 			return;
 		}
 #ifndef __SWITCH__
@@ -455,15 +520,6 @@ bool IsInsideRect(const SDL_Event &event, const SDL_Rect &rect)
 	return SDL_PointInRect(&point, &rect) == SDL_TRUE;
 }
 
-// Equivalent to SDL_Rect { ... } but avoids -Wnarrowing.
-inline SDL_Rect MakeRect(int x, int y, int w, int h)
-{
-	using Pos = decltype(SDL_Rect {}.x);
-	using Len = decltype(SDL_Rect {}.w);
-	return SDL_Rect { static_cast<Pos>(x), static_cast<Pos>(y),
-		static_cast<Len>(w), static_cast<Len>(h) };
-}
-
 void LoadHeros()
 {
 	LoadArt("ui_art\\heros.pcx", &ArtHero);
@@ -486,8 +542,8 @@ void LoadHeros()
 		if (offset + portraitHeight > ArtHero.h()) {
 			offset = 0;
 		}
-		SDL_Rect srcRect = MakeRect(0, offset, ArtHero.w(), portraitHeight);
-		SDL_Rect dstRect = MakeRect(0, i * portraitHeight, ArtHero.w(), portraitHeight);
+		SDL_Rect srcRect = MakeSdlRect(0, offset, ArtHero.w(), portraitHeight);
+		SDL_Rect dstRect = MakeSdlRect(0, i * portraitHeight, ArtHero.w(), portraitHeight);
 		SDL_BlitSurface(ArtHero.surface.get(), &srcRect, heros.get(), &dstRect);
 	}
 
@@ -499,7 +555,7 @@ void LoadHeros()
 		if (portrait.surface == nullptr)
 			continue;
 
-		SDL_Rect dstRect = MakeRect(0, i * portraitHeight, portrait.w(), portraitHeight);
+		SDL_Rect dstRect = MakeSdlRect(0, i * portraitHeight, portrait.w(), portraitHeight);
 		SDL_BlitSurface(portrait.surface.get(), nullptr, heros.get(), &dstRect);
 	}
 
@@ -523,6 +579,8 @@ void LoadUiGFX()
 	LoadHeros();
 }
 
+} // namespace
+
 void UnloadUiGFX()
 {
 	ArtHero.Unload();
@@ -532,8 +590,6 @@ void UnloadUiGFX()
 	for (auto &art : ArtLogos)
 		art.Unload();
 }
-
-} // namespace
 
 void UiInitialize()
 {
@@ -576,7 +632,7 @@ bool UiValidPlayerName(const char *name)
 	};
 
 	char tmpname[PLR_NAME_LEN];
-	strncpy(tmpname, name, PLR_NAME_LEN - 1);
+	CopyUtf8(tmpname, name, sizeof(tmpname));
 	for (size_t i = 0, n = strlen(tmpname); i < n; i++)
 		tmpname[i]++;
 
@@ -610,7 +666,7 @@ void LoadBackgroundArt(const char *pszFile, int frames)
 	fadeTc = 0;
 	fadeValue = 0;
 
-	if (IsHardwareCursorEnabled() && ArtCursor.surface != nullptr && GetCurrentCursorInfo().type() != CursorType::UserInterface) {
+	if (IsHardwareCursorEnabled() && ControlMode == ControlTypes::KeyboardAndMouse && ArtCursor.surface != nullptr && GetCurrentCursorInfo().type() != CursorType::UserInterface) {
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 		SDL_SetSurfacePalette(ArtCursor.surface.get(), Palette.get());
 		SDL_SetColorKey(ArtCursor.surface.get(), 1, 0);
@@ -685,10 +741,12 @@ void UiClearScreen()
 		SDL_FillRect(DiabloUiSurface(), nullptr, 0x000000);
 }
 
-void UiPollAndRender()
+void UiPollAndRender(std::function<bool(SDL_Event &)> eventHandler)
 {
 	SDL_Event event;
-	while (SDL_PollEvent(&event) != 0) {
+	while (PollEvent(&event) != 0) {
+		if (eventHandler && eventHandler(event))
+			continue;
 		UiFocusNavigation(&event);
 		UiHandleEvents(&event);
 	}
@@ -699,23 +757,25 @@ void UiPollAndRender()
 
 	// Must happen after the very first UiFadeIn, which sets the cursor.
 	if (IsHardwareCursor())
-		SetHardwareCursorVisible(!sgbControllerActive);
+		SetHardwareCursorVisible(ControlMode == ControlTypes::KeyboardAndMouse);
 
 #ifdef __3DS__
 	// Keyboard blocks until input is finished
 	// so defer until after render and fade-in
 	ctr_vkbdFlush();
 #endif
+
+	discord_manager::UpdateMenu();
 }
 
 namespace {
 
-void Render(UiText *uiText)
+void Render(const UiText *uiText)
 {
 	Rectangle rect { { uiText->m_rect.x, uiText->m_rect.y }, { uiText->m_rect.w, uiText->m_rect.h } };
 
 	const Surface &out = Surface(DiabloUiSurface());
-	DrawString(out, uiText->m_text, rect, uiText->m_iFlags | UiFlags::FontSizeDialog, 0);
+	DrawString(out, uiText->GetText(), rect, uiText->GetFlags() | UiFlags::FontSizeDialog);
 }
 
 void Render(const UiArtText *uiArtText)
@@ -723,20 +783,20 @@ void Render(const UiArtText *uiArtText)
 	Rectangle rect { { uiArtText->m_rect.x, uiArtText->m_rect.y }, { uiArtText->m_rect.w, uiArtText->m_rect.h } };
 
 	const Surface &out = Surface(DiabloUiSurface());
-	DrawString(out, uiArtText->text(), rect, uiArtText->m_iFlags, uiArtText->spacing(), uiArtText->lineHeight());
+	DrawString(out, uiArtText->GetText(), rect, uiArtText->GetFlags(), uiArtText->GetSpacing(), uiArtText->GetLineHeight());
 }
 
 void Render(const UiImage *uiImage)
 {
 	int x = uiImage->m_rect.x;
-	if (HasAnyOf(uiImage->m_iFlags, UiFlags::AlignCenter) && uiImage->m_art != nullptr) {
-		const int xOffset = GetCenterOffset(uiImage->m_art->w(), uiImage->m_rect.w);
+	if (uiImage->IsCentered() && uiImage->GetArt() != nullptr) {
+		const int xOffset = GetCenterOffset(uiImage->GetArt()->w(), uiImage->m_rect.w);
 		x += xOffset;
 	}
-	if (uiImage->m_animated) {
-		DrawAnimatedArt(uiImage->m_art, { x, uiImage->m_rect.y });
+	if (uiImage->IsAnimated()) {
+		DrawAnimatedArt(uiImage->GetArt(), { x, uiImage->m_rect.y });
 	} else {
-		DrawArt({ x, uiImage->m_rect.y }, uiImage->m_art, uiImage->m_frame, uiImage->m_rect.w);
+		DrawArt({ x, uiImage->m_rect.y }, uiImage->GetArt(), uiImage->GetFrame(), uiImage->m_rect.w);
 	}
 }
 
@@ -745,21 +805,24 @@ void Render(const UiArtTextButton *uiButton)
 	Rectangle rect { { uiButton->m_rect.x, uiButton->m_rect.y }, { uiButton->m_rect.w, uiButton->m_rect.h } };
 
 	const Surface &out = Surface(DiabloUiSurface());
-	DrawString(out, uiButton->m_text, rect, uiButton->m_iFlags);
+	DrawString(out, uiButton->GetText(), rect, uiButton->GetFlags());
 }
 
 void Render(const UiList *uiList)
 {
 	const Surface &out = Surface(DiabloUiSurface());
 
-	for (std::size_t i = 0; i < uiList->m_vecItems.size(); ++i) {
-		SDL_Rect rect = uiList->itemRect(i);
+	for (std::size_t i = listOffset; i < uiList->m_vecItems.size() && (i - listOffset) < ListViewportSize; ++i) {
+		SDL_Rect rect = uiList->itemRect(i - listOffset);
 		const UiListItem *item = uiList->GetItem(i);
-		if (i + (ListOffset == nullptr ? 0 : *ListOffset) == SelectedItem)
+		if (i == SelectedItem)
 			DrawSelector(rect);
 
 		Rectangle rectangle { { rect.x, rect.y }, { rect.w, rect.h } };
-		DrawString(out, item->m_text, rectangle, uiList->m_iFlags, uiList->spacing());
+		if (item->args.empty())
+			DrawString(out, item->m_text, rectangle, uiList->GetFlags() | item->uiFlags, uiList->GetSpacing());
+		else
+			DrawStringWithColors(out, item->m_text, item->args, rectangle, uiList->GetFlags() | item->uiFlags, uiList->GetSpacing());
 	}
 }
 
@@ -802,14 +865,14 @@ void Render(const UiEdit *uiEdit)
 	Rectangle rect { { uiEdit->m_rect.x + 43, uiEdit->m_rect.y + 1 }, { uiEdit->m_rect.w - 86, uiEdit->m_rect.h } };
 
 	const Surface &out = Surface(DiabloUiSurface());
-	DrawString(out, uiEdit->m_value, rect, uiEdit->m_iFlags | UiFlags::TextCursor);
+	DrawString(out, uiEdit->m_value, rect, uiEdit->GetFlags() | UiFlags::TextCursor);
 }
 
 void RenderItem(UiItemBase *item)
 {
-	if (item->has_flag(UiFlags::ElementHidden))
+	if (item->IsHidden())
 		return;
-	switch (item->m_type) {
+	switch (item->GetType()) {
 	case UiType::Text:
 		Render(static_cast<UiText *>(item));
 		break;
@@ -839,9 +902,11 @@ void RenderItem(UiItemBase *item)
 
 bool HandleMouseEventArtTextButton(const SDL_Event &event, const UiArtTextButton *uiButton)
 {
-	if (event.type != SDL_MOUSEBUTTONDOWN || event.button.button != SDL_BUTTON_LEFT)
+	if (event.type != SDL_MOUSEBUTTONUP || event.button.button != SDL_BUTTON_LEFT) {
 		return false;
-	uiButton->m_action();
+	}
+
+	uiButton->Activate();
 	return true;
 }
 
@@ -851,20 +916,22 @@ Uint32 dbClickTimer;
 
 bool HandleMouseEventList(const SDL_Event &event, UiList *uiList)
 {
-	if (event.type != SDL_MOUSEBUTTONDOWN || event.button.button != SDL_BUTTON_LEFT)
+	if (event.type != SDL_MOUSEBUTTONUP || event.button.button != SDL_BUTTON_LEFT)
 		return false;
 
 	std::size_t index = uiList->indexAt(event.button.y);
-	index += (ListOffset == nullptr ? 0 : *ListOffset);
+	index += listOffset;
 
 	if (gfnListFocus != nullptr && SelectedItem != index) {
-		UiFocus(index);
+		UiFocus(index, true, false);
 #ifdef USE_SDL1
 		dbClickTimer = SDL_GetTicks();
 	} else if (gfnListFocus == NULL || dbClickTimer + 500 >= SDL_GetTicks()) {
 #else
 	} else if (gfnListFocus == nullptr || event.button.clicks >= 2) {
 #endif
+		if (HasAnyOf(uiList->GetItem(index)->uiFlags, UiFlags::ElementHidden | UiFlags::ElementDisabled))
+			return false;
 		SelectedItem = index;
 		UiFocusNavigationSelect();
 #ifdef USE_SDL1
@@ -914,9 +981,9 @@ bool HandleMouseEventScrollBar(const SDL_Event &event, const UiScrollbar *uiSb)
 
 bool HandleMouseEvent(const SDL_Event &event, UiItemBase *item)
 {
-	if (item->has_any_flag(UiFlags::ElementHidden | UiFlags::ElementDisabled) || !IsInsideRect(event, item->m_rect))
+	if (item->IsNotInteractive() || !IsInsideRect(event, item->m_rect))
 		return false;
-	switch (item->m_type) {
+	switch (item->GetType()) {
 	case UiType::ArtTextButton:
 		return HandleMouseEventArtTextButton(event, static_cast<UiArtTextButton *>(item));
 	case UiType::Button:
@@ -973,8 +1040,9 @@ bool UiItemMouseEvents(SDL_Event *event, const std::vector<UiItemBase *> &items)
 	if (event->type == SDL_MOUSEBUTTONUP && event->button.button == SDL_BUTTON_LEFT) {
 		scrollBarState.downArrowPressed = scrollBarState.upArrowPressed = false;
 		for (const auto &item : items) {
-			if (item->m_type == UiType::Button)
+			if (item->IsType(UiType::Button)) {
 				HandleGlobalMouseUpButton(static_cast<UiButton *>(item));
+			}
 		}
 	}
 
@@ -1003,8 +1071,9 @@ bool UiItemMouseEvents(SDL_Event *event, const std::vector<std::unique_ptr<UiIte
 	if (event->type == SDL_MOUSEBUTTONUP && event->button.button == SDL_BUTTON_LEFT) {
 		scrollBarState.downArrowPressed = scrollBarState.upArrowPressed = false;
 		for (const auto &item : items) {
-			if (item->m_type == UiType::Button)
+			if (item->IsType(UiType::Button)) {
 				HandleGlobalMouseUpButton(static_cast<UiButton *>(item.get()));
+			}
 		}
 	}
 
@@ -1013,7 +1082,7 @@ bool UiItemMouseEvents(SDL_Event *event, const std::vector<std::unique_ptr<UiIte
 
 void DrawMouse()
 {
-	if (IsHardwareCursor() || sgbControllerActive)
+	if (ControlMode != ControlTypes::KeyboardAndMouse || IsHardwareCursor())
 		return;
 
 	DrawArt(MousePosition, &ArtCursor);

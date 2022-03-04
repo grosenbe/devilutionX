@@ -4,15 +4,14 @@
 
 #include "utils/file_util.h"
 #include "utils/log.hpp"
-#include "utils/stdcompat/optional.hpp"
 #include "utils/sdl_ptrs.h"
+
+#ifdef __IPHONEOS__
+#include "platform/ios/ios_paths.h"
+#endif
 
 #ifdef USE_SDL1
 #include "utils/sdl2_to_1_2_backports.h"
-#endif
-
-#ifndef MO_LANG_DIR
-#define MO_LANG_DIR ""
 #endif
 
 namespace devilution {
@@ -24,7 +23,8 @@ namespace {
 std::optional<std::string> basePath;
 std::optional<std::string> prefPath;
 std::optional<std::string> configPath;
-std::optional<std::string> langPath;
+std::optional<std::string> assetsPath;
+std::optional<std::string> mpqDir;
 
 void AddTrailingSlash(std::string &path)
 {
@@ -61,10 +61,14 @@ const std::string &BasePath()
 const std::string &PrefPath()
 {
 	if (!prefPath) {
+#ifndef __IPHONEOS__
 		prefPath = FromSDL(SDL_GetPrefPath("diasurgical", "devilution"));
 		if (FileExistsAndIsWriteable("diablo.ini")) {
 			prefPath = std::string("./");
 		}
+#else
+		prefPath = FromSDL(IOSGetPrefPath());
+#endif
 	}
 	return *prefPath;
 }
@@ -72,19 +76,32 @@ const std::string &PrefPath()
 const std::string &ConfigPath()
 {
 	if (!configPath) {
+#ifndef __IPHONEOS__
 		configPath = FromSDL(SDL_GetPrefPath("diasurgical", "devilution"));
 		if (FileExistsAndIsWriteable("diablo.ini")) {
 			configPath = std::string("./");
 		}
+#else
+		configPath = FromSDL(IOSGetPrefPath());
+#endif
 	}
 	return *configPath;
 }
 
-const std::string &LangPath()
+const std::string &AssetsPath()
 {
-	if (!langPath)
-		langPath.emplace(MO_LANG_DIR);
-	return *langPath;
+	if (!assetsPath)
+#if __EMSCRIPTEN__
+		assetsPath.emplace("assets/");
+#else
+		assetsPath.emplace(FromSDL(SDL_GetBasePath()) + "assets/");
+#endif
+	return *assetsPath;
+}
+
+const std::optional<std::string> &MpqDir()
+{
+	return mpqDir;
 }
 
 void SetBasePath(const std::string &path)
@@ -105,10 +122,15 @@ void SetConfigPath(const std::string &path)
 	AddTrailingSlash(*configPath);
 }
 
-void SetLangPath(const std::string &path)
+void SetAssetsPath(const std::string &path)
 {
-	langPath = path;
-	AddTrailingSlash(*langPath);
+	assetsPath = path;
+	AddTrailingSlash(*assetsPath);
+}
+
+void SetMpqDir(const std::string &path)
+{
+	mpqDir = std::string(path);
 }
 
 } // namespace paths

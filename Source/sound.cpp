@@ -16,10 +16,9 @@
 #include <SDL.h>
 #include <aulib.h>
 
+#include "engine/assets.hpp"
 #include "init.h"
 #include "options.h"
-#include "storm/storm.h"
-#include "storm/storm_sdl_rw.h"
 #include "utils/log.hpp"
 #include "utils/math.h"
 #include "utils/sdl_mutex.h"
@@ -46,20 +45,18 @@ std::optional<Aulib::Stream> music;
 std::unique_ptr<char[]> musicBuffer;
 #endif
 
-void LoadMusic(HANDLE handle)
+void LoadMusic(SDL_RWops *handle)
 {
-#ifndef DISABLE_STREAMING_MUSIC
-	SDL_RWops *musicRw = SFileRw_FromStormHandle(handle);
-#else
-	size_t bytestoread = SFileGetFileSize(handle);
+#ifdef DISABLE_STREAMING_MUSIC
+	size_t bytestoread = SDL_RWsize(handle);
 	musicBuffer.reset(new char[bytestoread]);
-	SFileReadFileThreadSafe(handle, musicBuffer.get(), bytestoread);
-	SFileCloseFileThreadSafe(handle);
+	SDL_RWread(handle, musicBuffer.get(), bytestoread, 1);
+	SDL_RWclose(handle);
 
-	SDL_RWops *musicRw = SDL_RWFromConstMem(musicBuffer.get(), bytestoread);
+	handle = SDL_RWFromConstMem(musicBuffer.get(), bytestoread);
 #endif
-	music.emplace(musicRw, std::make_unique<Aulib::DecoderDrwav>(),
-	    std::make_unique<Aulib::ResamplerSpeex>(sgOptions.Audio.nResamplingQuality), /*closeRw=*/true);
+	music.emplace(handle, std::make_unique<Aulib::DecoderDrwav>(),
+	    std::make_unique<Aulib::ResamplerSpeex>(*sgOptions.Audio.resamplingQuality), /*closeRw=*/true);
 }
 
 void CleanupMusic()
@@ -148,7 +145,7 @@ void snd_play_snd(TSnd *pSnd, int lVolume, int lPan)
 			return;
 	}
 
-	sound->Play(lVolume, sgOptions.Audio.nSoundVolume, lPan);
+	sound->Play(lVolume, *sgOptions.Audio.soundVolume, lPan);
 	pSnd->start_tc = tc;
 }
 
@@ -166,15 +163,17 @@ std::unique_ptr<TSnd> sound_file_load(const char *path, bool stream)
 		}
 #ifndef STREAM_ALL_AUDIO
 	} else {
-		HANDLE file;
-		if (!SFileOpenFile(path, &file)) {
-			ErrDlg("SFileOpenFile failed", path, __FILE__, __LINE__);
+		SDL_RWops *file = OpenAsset(path);
+		if (file == nullptr) {
+			ErrDlg("OpenAsset failed", path, __FILE__, __LINE__);
 		}
-		size_t dwBytes = SFileGetFileSize(file);
+		size_t dwBytes = SDL_RWsize(file);
 		auto waveFile = MakeArraySharedPtr<std::uint8_t>(dwBytes);
-		SFileReadFileThreadSafe(file, waveFile.get(), dwBytes);
+		if (SDL_RWread(file, waveFile.get(), dwBytes, 1) == 0) {
+			ErrDlg("Failed to read file", fmt::format("{}: {}", path, SDL_GetError()).c_str(), __FILE__, __LINE__);
+		}
 		int error = snd->DSB.SetChunk(waveFile, dwBytes);
-		SFileCloseFileThreadSafe(file);
+		SDL_RWclose(file);
 		if (error != 0) {
 			ErrSdl();
 		}
@@ -192,17 +191,17 @@ TSnd::~TSnd()
 
 void snd_init()
 {
-	sgOptions.Audio.nSoundVolume = CapVolume(sgOptions.Audio.nSoundVolume);
-	gbSoundOn = sgOptions.Audio.nSoundVolume > VOLUME_MIN;
+	sgOptions.Audio.soundVolume.SetValue(CapVolume(*sgOptions.Audio.soundVolume));
+	gbSoundOn = *sgOptions.Audio.soundVolume > VOLUME_MIN;
 	sgbSaveSoundOn = gbSoundOn;
 
-	sgOptions.Audio.nMusicVolume = CapVolume(sgOptions.Audio.nMusicVolume);
-	gbMusicOn = sgOptions.Audio.nMusicVolume > VOLUME_MIN;
+	sgOptions.Audio.musicVolume.SetValue(CapVolume(*sgOptions.Audio.musicVolume));
+	gbMusicOn = *sgOptions.Audio.musicVolume > VOLUME_MIN;
 
 	// Initialize the SDL_audiolib library. Set the output sample rate to
 	// 22kHz, the audio format to 16-bit signed, use 2 output channels
 	// (stereo), and a 2KiB output buffer.
-	if (!Aulib::init(sgOptions.Audio.nSampleRate, AUDIO_S16, sgOptions.Audio.nChannels, sgOptions.Audio.nBufferSize)) {
+	if (!Aulib::init(*sgOptions.Audio.sampleRate, AUDIO_S16, *sgOptions.Audio.channels, *sgOptions.Audio.bufferSize)) {
 		LogError(LogCategory::Audio, "Failed to initialize audio (Aulib::init): {}", SDL_GetError());
 		return;
 	}
@@ -231,21 +230,23 @@ void music_stop()
 
 void music_start(uint8_t nTrack)
 {
-	bool success;
 	const char *trackPath;
 
 	assert(nTrack < NUM_MUSIC);
 	music_stop();
 	if (gbMusicOn) {
-		if (spawn_mpq != nullptr)
+		if (spawn_mpq)
 			trackPath = SpawnMusicTracks[nTrack];
 		else
 			trackPath = MusicTracks[nTrack];
-		HANDLE handle;
-		success = SFileOpenFile(trackPath, &handle);
-		if (!success) {
-			handle = nullptr;
-		} else {
+
+#ifdef DISABLE_STREAMING_MUSIC
+		const bool threadsafe = false;
+#else
+		const bool threadsafe = true;
+#endif
+		SDL_RWops *handle = OpenAsset(trackPath, threadsafe);
+		if (handle != nullptr) {
 			LoadMusic(handle);
 			if (!music->open()) {
 				LogError(LogCategory::Audio, "Aulib::Stream::open (from music_start): {}", SDL_GetError());
@@ -253,7 +254,9 @@ void music_start(uint8_t nTrack)
 				return;
 			}
 
-			music->setVolume(VolumeLogToLinear(sgOptions.Audio.nMusicVolume, VOLUME_MIN, VOLUME_MAX));
+			music->setVolume(VolumeLogToLinear(*sgOptions.Audio.musicVolume, VOLUME_MIN, VOLUME_MAX));
+			if (!diablo_is_focused())
+				music_mute();
 			if (!music->play(/*iterations=*/0)) {
 				LogError(LogCategory::Audio, "Aulib::Stream::play (from music_start): {}", SDL_GetError());
 				CleanupMusic();
@@ -277,36 +280,36 @@ void sound_disable_music(bool disable)
 int sound_get_or_set_music_volume(int volume)
 {
 	if (volume == 1)
-		return sgOptions.Audio.nMusicVolume;
+		return *sgOptions.Audio.musicVolume;
 
-	sgOptions.Audio.nMusicVolume = volume;
+	sgOptions.Audio.musicVolume.SetValue(volume);
 
 	if (music)
-		music->setVolume(VolumeLogToLinear(sgOptions.Audio.nMusicVolume, VOLUME_MIN, VOLUME_MAX));
+		music->setVolume(VolumeLogToLinear(*sgOptions.Audio.musicVolume, VOLUME_MIN, VOLUME_MAX));
 
-	return sgOptions.Audio.nMusicVolume;
+	return *sgOptions.Audio.musicVolume;
 }
 
 int sound_get_or_set_sound_volume(int volume)
 {
 	if (volume == 1)
-		return sgOptions.Audio.nSoundVolume;
+		return *sgOptions.Audio.soundVolume;
 
-	sgOptions.Audio.nSoundVolume = volume;
+	sgOptions.Audio.soundVolume.SetValue(volume);
 
-	return sgOptions.Audio.nSoundVolume;
+	return *sgOptions.Audio.soundVolume;
 }
 
 void music_mute()
 {
 	if (music)
-		music->setVolume(VolumeLogToLinear(VOLUME_MIN, VOLUME_MIN, VOLUME_MAX));
+		music->mute();
 }
 
 void music_unmute()
 {
 	if (music)
-		music->setVolume(VolumeLogToLinear(sgOptions.Audio.nMusicVolume, VOLUME_MIN, VOLUME_MAX));
+		music->unmute();
 }
 
 } // namespace devilution

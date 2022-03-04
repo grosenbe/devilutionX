@@ -1,13 +1,13 @@
 /**
-* @file autopickup.h
-*
-* QoL feature for automatically picking up gold
-*/
+ * @file autopickup.h
+ *
+ * QoL feature for automatically picking up gold
+ */
 
 #pragma once
 
 namespace devilution {
 
-void AutoGoldPickup(int pnum);
+void AutoPickup(int pnum);
 
 } // namespace devilution

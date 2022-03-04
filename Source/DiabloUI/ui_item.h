@@ -6,6 +6,9 @@
 #include <vector>
 
 #include "DiabloUI/art.h"
+#include "DiabloUI/ui_flags.hpp"
+#include "engine/render/text_render.hpp"
+#include "utils/enum_traits.h"
 #include "utils/stubs.h"
 
 namespace devilution {
@@ -21,124 +24,66 @@ enum class UiType {
 	Edit,
 };
 
-enum class UiFlags {
-	// clang-format off
-	None               = 0,
-
-	FontSize12         = 1 << 0,
-	FontSize24         = 1 << 1,
-	FontSize30         = 1 << 2,
-	FontSize42         = 1 << 3,
-	FontSize46         = 1 << 4,
-	FontSizeDialog     = 1 << 5,
-
-	ColorUiGold        = 1 << 6,
-	ColorUiSilver      = 1 << 7,
-	ColorUiGoldDark    = 1 << 8,
-	ColorUiSilverDark  = 1 << 9,
-	ColorDialogWhite   = 1 << 10,
-	ColorDialogYellow  = 1 << 11,
-	ColorGold          = 1 << 12,
-	ColorBlack         = 1 << 13,
-	ColorWhite         = 1 << 14,
-	ColorWhitegold     = 1 << 15,
-	ColorRed           = 1 << 16,
-	ColorBlue          = 1 << 17,
-	ColorButtonface    = 1 << 18,
-	ColorButtonpushed  = 1 << 19,
-
-	AlignCenter        = 1 << 20,
-	AlignRight         = 1 << 21,
-	VerticalCenter     = 1 << 22,
-
-	KerningFitSpacing  = 1 << 23,
-
-	ElementDisabled    = 1 << 24,
-	ElementHidden      = 1 << 25,
-
-	PentaCursor        = 1 << 26,
-	TextCursor         = 1 << 27,
-	// clang-format on
-};
-
-enum class UiPanels {
-	Main,
-	Quest,
-	Character,
-	Spell,
-	Inventory,
-};
-
-inline UiFlags operator|(UiFlags lhs, UiFlags rhs)
-{
-	using T = std::underlying_type_t<UiFlags>;
-	return static_cast<UiFlags>(static_cast<T>(lhs) | static_cast<T>(rhs));
-}
-
-inline UiFlags operator|=(UiFlags &lhs, UiFlags rhs)
-{
-	lhs = lhs | rhs;
-	return lhs;
-}
-
-inline UiFlags operator&(UiFlags lhs, UiFlags rhs)
-{
-	using T = std::underlying_type_t<UiFlags>;
-	return static_cast<UiFlags>(static_cast<T>(lhs) & static_cast<T>(rhs));
-}
-
-inline UiFlags operator&=(UiFlags &lhs, UiFlags rhs)
-{
-	lhs = lhs & rhs;
-	return lhs;
-}
-
-inline UiFlags operator~(UiFlags value)
-{
-	using T = std::underlying_type_t<UiFlags>;
-	return static_cast<UiFlags>(~static_cast<T>(value));
-}
-
-inline bool HasAnyOf(UiFlags lhs, UiFlags test)
-{
-	return (lhs & test) != UiFlags::None;
-}
-
 class UiItemBase {
 public:
+	virtual ~UiItemBase() = default;
+
+	[[nodiscard]] UiType GetType() const
+	{
+		return type_;
+	}
+
+	[[nodiscard]] bool IsType(UiType testType) const
+	{
+		return type_ == testType;
+	}
+
+	[[nodiscard]] UiFlags GetFlags() const
+	{
+		return uiFlags_;
+	}
+
+	[[nodiscard]] bool IsHidden() const
+	{
+		return HasAnyOf(uiFlags_, UiFlags::ElementHidden);
+	}
+
+	[[nodiscard]] bool IsNotInteractive() const
+	{
+		return HasAnyOf(uiFlags_, UiFlags::ElementHidden | UiFlags::ElementDisabled);
+	}
+
+	void Hide()
+	{
+		uiFlags_ |= UiFlags::ElementHidden;
+	}
+
+	void Show()
+	{
+		uiFlags_ &= ~UiFlags::ElementHidden;
+	}
+
+protected:
 	UiItemBase(UiType type, SDL_Rect rect, UiFlags flags)
-	    : m_type(type)
+	    : type_(type)
 	    , m_rect(rect)
-	    , m_iFlags(flags)
+	    , uiFlags_(flags)
 	{
 	}
 
-	virtual ~UiItemBase() {};
-
-	bool has_flag(UiFlags flag) const
+	void SetFlags(UiFlags flags)
 	{
-		return (m_iFlags & flag) == flag;
+		uiFlags_ = flags;
 	}
 
-	bool has_any_flag(UiFlags flags) const
-	{
-		return HasAnyOf(m_iFlags, flags);
-	}
+private:
+	UiType type_;
 
-	void add_flag(UiFlags flag)
-	{
-		m_iFlags |= flag;
-	}
-
-	void remove_flag(UiFlags flag)
-	{
-		m_iFlags &= ~flag;
-	}
-
-	//protected:
-	UiType m_type;
+public:
 	SDL_Rect m_rect;
-	UiFlags m_iFlags;
+
+private:
+	UiFlags uiFlags_;
 };
 
 //=============================================================================
@@ -147,18 +92,41 @@ class UiImage : public UiItemBase {
 public:
 	UiImage(Art *art, SDL_Rect rect, UiFlags flags = UiFlags::None, bool animated = false, int frame = 0)
 	    : UiItemBase(UiType::Image, rect, flags)
-	    , m_art(art)
-	    , m_animated(animated)
-	    , m_frame(frame)
+	    , art_(art)
+	    , animated_(animated)
+	    , frame_(frame)
 	{
 	}
 
-	~UiImage() {};
+	[[nodiscard]] bool IsCentered() const
+	{
+		return HasAnyOf(GetFlags(), UiFlags::AlignCenter);
+	}
 
-	//private:
-	Art *m_art;
-	bool m_animated;
-	int m_frame;
+	[[nodiscard]] Art *GetArt() const
+	{
+		return art_;
+	}
+
+	[[nodiscard]] bool IsAnimated() const
+	{
+		return animated_;
+	}
+
+	[[nodiscard]] int GetFrame() const
+	{
+		return frame_;
+	}
+
+	void SetFrame(int frame)
+	{
+		frame_ = frame;
+	}
+
+private:
+	Art *art_;
+	bool animated_;
+	int frame_;
 };
 
 //=============================================================================
@@ -173,9 +141,9 @@ public:
 	 */
 	UiArtText(const char *text, SDL_Rect rect, UiFlags flags = UiFlags::None, int spacing = 1, int lineHeight = -1)
 	    : UiItemBase(UiType::ArtText, rect, flags)
-	    , m_text(text)
-	    , m_spacing(spacing)
-	    , m_lineHeight(lineHeight)
+	    , text_(text)
+	    , spacing_(spacing)
+	    , lineHeight_(lineHeight)
 	{
 	}
 
@@ -187,36 +155,34 @@ public:
 	 */
 	UiArtText(const char **ptext, SDL_Rect rect, UiFlags flags = UiFlags::None, int spacing = 1, int lineHeight = -1)
 	    : UiItemBase(UiType::ArtText, rect, flags)
-	    , m_ptext(ptext)
-	    , m_spacing(spacing)
-	    , m_lineHeight(lineHeight)
+	    , textPointer_(ptext)
+	    , spacing_(spacing)
+	    , lineHeight_(lineHeight)
 	{
 	}
 
-	const char *text() const
+	[[nodiscard]] string_view GetText() const
 	{
-		if (m_text != nullptr)
-			return m_text;
-		return *m_ptext;
+		if (text_ != nullptr)
+			return text_;
+		return *textPointer_;
 	}
 
-	int spacing() const
+	[[nodiscard]] int GetSpacing() const
 	{
-		return m_spacing;
+		return spacing_;
 	}
 
-	int lineHeight() const
+	[[nodiscard]] int GetLineHeight() const
 	{
-		return m_lineHeight;
+		return lineHeight_;
 	}
-
-	~UiArtText() {};
 
 private:
-	const char *m_text = nullptr;
-	const char **m_ptext = nullptr;
-	int m_spacing = 1;
-	int m_lineHeight = -1;
+	const char *text_ = nullptr;
+	const char **textPointer_ = nullptr;
+	int spacing_;
+	int lineHeight_;
 };
 
 //=============================================================================
@@ -231,7 +197,7 @@ public:
 	{
 	}
 
-	//private:
+	// private:
 	Art *m_bg;
 	Art *m_thumb;
 	Art *m_arrow;
@@ -241,34 +207,53 @@ public:
 
 class UiArtTextButton : public UiItemBase {
 public:
-	UiArtTextButton(const char *text, void (*action)(), SDL_Rect rect, UiFlags flags = UiFlags::None)
+	using Callback = void (*)();
+
+	UiArtTextButton(const char *text, Callback action, SDL_Rect rect, UiFlags flags = UiFlags::None)
 	    : UiItemBase(UiType::ArtTextButton, rect, flags)
-	    , m_text(text)
-	    , m_action(action)
+	    , text_(text)
+	    , action_(action)
 	{
 	}
 
-	//private:
-	const char *m_text;
-	void (*m_action)();
+	void SetFlags(UiFlags flags)
+	{
+		UiItemBase::SetFlags(flags);
+	}
+
+	[[nodiscard]] string_view GetText() const
+	{
+		return text_;
+	}
+
+	void Activate() const
+	{
+		action_();
+	}
+
+private:
+	const char *text_;
+	Callback action_;
 };
 
 //=============================================================================
 
 class UiEdit : public UiItemBase {
 public:
-	UiEdit(const char *hint, char *value, std::size_t max_length, SDL_Rect rect, UiFlags flags = UiFlags::None)
+	UiEdit(const char *hint, char *value, std::size_t maxLength, bool allowEmpty, SDL_Rect rect, UiFlags flags = UiFlags::None)
 	    : UiItemBase(UiType::Edit, rect, flags)
 	    , m_hint(hint)
 	    , m_value(value)
-	    , m_max_length(max_length)
+	    , m_max_length(maxLength)
+	    , m_allowEmpty(allowEmpty)
 	{
 	}
 
-	//private:
+	// private:
 	const char *m_hint;
 	char *m_value;
 	std::size_t m_max_length;
+	bool m_allowEmpty;
 };
 
 //=============================================================================
@@ -279,12 +264,17 @@ class UiText : public UiItemBase {
 public:
 	UiText(const char *text, SDL_Rect rect, UiFlags flags = UiFlags::ColorDialogWhite)
 	    : UiItemBase(UiType::Text, rect, flags)
-	    , m_text(text)
+	    , text_(text)
 	{
 	}
 
-	//private:
-	const char *m_text;
+	[[nodiscard]] string_view GetText() const
+	{
+		return text_;
+	}
+
+private:
+	const char *text_;
 };
 
 //=============================================================================
@@ -293,66 +283,107 @@ public:
 
 class UiButton : public UiItemBase {
 public:
-	UiButton(Art *art, const char *text, void (*action)(), SDL_Rect rect, UiFlags flags = UiFlags::None)
+	using Callback = void (*)();
+
+	UiButton(Art *art, const char *text, Callback action, SDL_Rect rect, UiFlags flags = UiFlags::None)
 	    : UiItemBase(UiType::Button, rect, flags)
-	    , m_art(art)
-	    , m_text(text)
-	    , m_action(action)
-	    , m_pressed(false)
+	    , art_(art)
+	    , text_(text)
+	    , action_(action)
+	    , pressed_(false)
 	{
 	}
 
-	enum FrameKey : uint8_t {
-		DEFAULT,
-		PRESSED,
-	};
+	[[nodiscard]] int GetFrame() const
+	{
+		// Frame 1 is a held button sprite, frame 0 is the default
+		return IsPressed() ? 1 : 0;
+	}
 
-	//private:
-	Art *m_art;
+	[[nodiscard]] Art *GetArt() const
+	{
+		return art_;
+	}
 
-	const char *m_text;
-	void (*m_action)();
+	[[nodiscard]] string_view GetText() const
+	{
+		return text_;
+	}
+
+	void Activate() const
+	{
+		action_();
+	}
+
+	[[nodiscard]] bool IsPressed() const
+	{
+		return pressed_;
+	}
+
+	void Press()
+	{
+		pressed_ = true;
+	}
+
+	void Release()
+	{
+		pressed_ = false;
+	}
+
+private:
+	Art *art_;
+
+	const char *text_;
+	Callback action_;
 
 	// State
-	bool m_pressed;
+	bool pressed_;
 };
 
 //=============================================================================
 
 class UiListItem {
 public:
-	UiListItem(const char *text = "", int value = 0)
+	UiListItem(const char *text = "", int value = 0, UiFlags uiFlags = UiFlags::None)
 	    : m_text(text)
 	    , m_value(value)
+	    , uiFlags(uiFlags)
 	{
 	}
 
-	~UiListItem() {};
+	UiListItem(const char *text, std::vector<DrawStringFormatArg> &args, int value = 0, UiFlags uiFlags = UiFlags::None)
+	    : m_text(text)
+	    , args(args)
+	    , m_value(value)
+	    , uiFlags(uiFlags)
+	{
+	}
 
-	//private:
+	// private:
 	const char *m_text;
+	std::vector<DrawStringFormatArg> args;
 	int m_value;
+	UiFlags uiFlags;
 };
-
-typedef std::vector<std::unique_ptr<UiListItem>> vUiListItem;
 
 class UiList : public UiItemBase {
 public:
-	UiList(const vUiListItem &vItems, Sint16 x, Sint16 y, Uint16 item_width, Uint16 item_height, UiFlags flags = UiFlags::None, int spacing = 1)
-	    : UiItemBase(UiType::List, { x, y, item_width, static_cast<Uint16>(item_height * vItems.size()) }, flags)
+	using vUiListItem = std::vector<std::unique_ptr<UiListItem>>;
+
+	UiList(const vUiListItem &vItems, size_t viewportSize, Sint16 x, Sint16 y, Uint16 item_width, Uint16 item_height, UiFlags flags = UiFlags::None, int spacing = 1)
+	    : UiItemBase(UiType::List, { x, y, item_width, static_cast<Uint16>(item_height * viewportSize) }, flags)
+	    , viewportSize(viewportSize)
 	    , m_x(x)
 	    , m_y(y)
 	    , m_width(item_width)
 	    , m_height(item_height)
-	    , m_spacing(spacing)
+	    , spacing_(spacing)
 	{
-		for (auto &item : vItems)
+		for (const auto &item : vItems)
 			m_vecItems.push_back(item.get());
 	}
 
-	~UiList() {};
-
-	SDL_Rect itemRect(int i) const
+	[[nodiscard]] SDL_Rect itemRect(int i) const
 	{
 		SDL_Rect tmp;
 		tmp.x = m_x;
@@ -363,7 +394,7 @@ public:
 		return tmp;
 	}
 
-	int indexAt(Sint16 y) const
+	[[nodiscard]] size_t indexAt(Sint16 y) const
 	{
 		ASSERT(y >= m_rect.y);
 		const size_t index = (y - m_rect.y) / m_height;
@@ -371,20 +402,23 @@ public:
 		return index;
 	}
 
-	UiListItem *GetItem(int i) const
+	[[nodiscard]] UiListItem *GetItem(std::size_t i) const
 	{
 		return m_vecItems[i];
 	}
 
-	int spacing() const
+	[[nodiscard]] int GetSpacing() const
 	{
-		return m_spacing;
+		return spacing_;
 	}
 
-	//private:
+	// private:
+	size_t viewportSize;
 	Sint16 m_x, m_y;
 	Uint16 m_width, m_height;
 	std::vector<UiListItem *> m_vecItems;
-	int m_spacing;
+
+private:
+	int spacing_;
 };
 } // namespace devilution

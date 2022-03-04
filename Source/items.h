@@ -7,10 +7,10 @@
 
 #include <cstdint>
 
-#include "DiabloUI/ui_item.h"
+#include "DiabloUI/ui_flags.hpp"
+#include "engine.h"
 #include "engine/animationinfo.h"
 #include "engine/point.hpp"
-#include "engine.h"
 #include "itemdat.h"
 #include "monster.h"
 #include "utils/stdcompat/optional.hpp"
@@ -202,8 +202,8 @@ struct Item {
 	enum spell_id _iSpell;
 	int _iCharges;
 	int _iMaxCharges;
-	uint8_t _iDurability;
-	uint8_t _iMaxDur;
+	int _iDurability;
+	int _iMaxDur;
 	int16_t _iPLDam;
 	int16_t _iPLToHit;
 	int16_t _iPLAC;
@@ -367,6 +367,11 @@ struct Item {
 		return IsScroll() && _iSpell == spellId;
 	}
 
+	[[nodiscard]] bool KeyAttributesMatch(int32_t seed, _item_indexes itemIndex, uint16_t createInfo) const
+	{
+		return _iSeed == seed && IDidx == itemIndex && _iCreateInfo == createInfo;
+	}
+
 	UiFlags getTextColor() const
 	{
 		switch (_iMagical) {
@@ -409,9 +414,8 @@ struct CornerStoneStruct {
 struct Player;
 
 extern Item Items[MAXITEMS + 1];
-extern int ActiveItems[MAXITEMS];
-extern int ActiveItemCount;
-extern int AvailableItems[MAXITEMS];
+extern uint8_t ActiveItems[MAXITEMS];
+extern uint8_t ActiveItemCount;
 extern bool ShowUniqueItemInfoBox;
 extern CornerStoneStruct CornerStone;
 extern bool UniqueItemFlags[128];
@@ -459,7 +463,7 @@ void SpawnMapOfDoom(Point position);
 void SpawnRuneBomb(Point position);
 void SpawnTheodore(Point position);
 void RespawnItem(Item *item, bool FlipFlag);
-void DeleteItem(int ii, int i);
+void DeleteItem(int i);
 void ProcessItems();
 void FreeItemGFX();
 void GetItemFrm(Item &item);
@@ -468,11 +472,13 @@ void CheckIdentify(Player &player, int cii);
 void DoRepair(Player &player, int cii);
 void DoRecharge(Player &player, int cii);
 void DoOil(Player &player, int cii);
-void PrintItemPower(char plidx, Item *x);
+[[nodiscard]] std::string PrintItemPower(char plidx, const Item &item);
 void DrawUniqueInfo(const Surface &out);
-void PrintItemDetails(Item *x);
-void PrintItemDur(Item *x);
+void PrintItemDetails(const Item &item);
+void PrintItemDur(const Item &item);
 void UseItem(int p, item_misc_id Mid, spell_id spl);
+bool UseItemOpensHive(const Item &item, Point position);
+bool UseItemOpensCrypt(const Item &item, Point position);
 void SpawnSmith(int lvl);
 void SpawnPremium(int pnum);
 void SpawnWitch(int lvl);

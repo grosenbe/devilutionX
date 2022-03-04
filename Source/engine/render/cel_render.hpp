@@ -8,9 +8,9 @@
 #include <utility>
 
 #include "engine.h"
-#include "items.h"
 #include "engine/cel_sprite.hpp"
 #include "engine/point.hpp"
+#include "items.h"
 
 namespace devilution {
 
@@ -66,7 +66,7 @@ void CelDrawLightTo(const Surface &out, Point position, const CelSprite &cel, in
 void CelClippedDrawLightTo(const Surface &out, Point position, const CelSprite &cel, int frame);
 
 /**
- * @brief Same as CelBlitLightTransSafeTo
+ * @brief Same as CelBlitLightSafeTo but with transparency applied
  * @param out Target buffer
  * @param position Target buffer coordinate
  * @param cel CEL sprite

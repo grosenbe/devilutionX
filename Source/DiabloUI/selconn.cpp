@@ -2,16 +2,22 @@
 
 #include "DiabloUI/diabloui.h"
 #include "stores.h"
-#include "storm/storm.h"
+#include "storm/storm_net.hpp"
 #include "utils/language.h"
 
 namespace devilution {
 
 int provider;
+const char *ConnectionNames[] {
+	"ZeroTier",
+	N_("Client-Server (TCP)"),
+	N_("Loopback"),
+};
+
 namespace {
 
-char selconn_MaxPlayers[21];
-char selconn_Description[64];
+char selconn_MaxPlayers[64];
+char selconn_Description[256];
 char selconn_Gateway[129];
 bool selconn_ReturnValue = false;
 bool selconn_EndMenu = false;
@@ -32,13 +38,13 @@ void SelconnLoad()
 
 #ifndef NONET
 #ifndef DISABLE_ZERO_TIER
-	vecConnItems.push_back(std::make_unique<UiListItem>("Zerotier", SELCONN_ZT));
+	vecConnItems.push_back(std::make_unique<UiListItem>(ConnectionNames[SELCONN_ZT], SELCONN_ZT));
 #endif
 #ifndef DISABLE_TCP
-	vecConnItems.push_back(std::make_unique<UiListItem>(_("Client-Server (TCP)"), SELCONN_TCP));
+	vecConnItems.push_back(std::make_unique<UiListItem>(_(ConnectionNames[SELCONN_TCP]), SELCONN_TCP));
 #endif
 #endif
-	vecConnItems.push_back(std::make_unique<UiListItem>(_("Loopback"), SELCONN_LOOPBACK));
+	vecConnItems.push_back(std::make_unique<UiListItem>(_(ConnectionNames[SELCONN_LOOPBACK]), SELCONN_LOOPBACK));
 
 	UiAddBackground(&vecSelConnDlg);
 	UiAddLogo(&vecSelConnDlg);
@@ -67,7 +73,7 @@ void SelconnLoad()
 	SDL_Rect rect8 = { (Sint16)(PANEL_LEFT + 16), (Sint16)(UI_OFFSET_Y + 427), 250, 35 };
 	vecSelConnDlg.push_back(std::make_unique<UiArtTextButton>(_("Change Gateway"), nullptr, rect8, UiFlags::AlignCenter | UiFlags::VerticalCenter | UiFlags::FontSize30 | UiFlags::ColorUiGold | UiFlags::ElementHidden));
 
-	vecSelConnDlg.push_back(std::make_unique<UiList>(vecConnItems, PANEL_LEFT + 305, (UI_OFFSET_Y + 256), 285, 26, UiFlags::AlignCenter | UiFlags::FontSize12 | UiFlags::VerticalCenter | UiFlags::ColorUiGoldDark));
+	vecSelConnDlg.push_back(std::make_unique<UiList>(vecConnItems, vecConnItems.size(), PANEL_LEFT + 305, (UI_OFFSET_Y + 256), 285, 26, UiFlags::AlignCenter | UiFlags::FontSize12 | UiFlags::VerticalCenter | UiFlags::ColorUiGoldDark));
 
 	SDL_Rect rect9 = { (Sint16)(PANEL_LEFT + 299), (Sint16)(UI_OFFSET_Y + 427), 140, 35 };
 	vecSelConnDlg.push_back(std::make_unique<UiArtTextButton>(_("OK"), &UiFocusNavigationSelect, rect9, UiFlags::AlignCenter | UiFlags::VerticalCenter | UiFlags::FontSize30 | UiFlags::ColorUiGold));
@@ -75,7 +81,7 @@ void SelconnLoad()
 	SDL_Rect rect10 = { (Sint16)(PANEL_LEFT + 454), (Sint16)(UI_OFFSET_Y + 427), 140, 35 };
 	vecSelConnDlg.push_back(std::make_unique<UiArtTextButton>(_("Cancel"), &UiFocusNavigationEsc, rect10, UiFlags::AlignCenter | UiFlags::VerticalCenter | UiFlags::FontSize30 | UiFlags::ColorUiGold));
 
-	UiInitList(vecConnItems.size(), SelconnFocus, SelconnSelect, SelconnEsc, vecSelConnDlg, true);
+	UiInitList(SelconnFocus, SelconnSelect, SelconnEsc, vecSelConnDlg, true);
 }
 
 void SelconnFree()
@@ -98,21 +104,21 @@ void SelconnFocus(int value)
 	int players = MAX_PLRS;
 	switch (vecConnItems[value]->m_value) {
 	case SELCONN_TCP:
-		strncpy(selconn_Description, _("All computers must be connected to a TCP-compatible network."), sizeof(selconn_Description) - 1);
+		strcpy(selconn_Description, _("All computers must be connected to a TCP-compatible network."));
 		players = MAX_PLRS;
 		break;
 	case SELCONN_ZT:
-		strncpy(selconn_Description, _("All computers must be connected to the internet."), sizeof(selconn_Description) - 1);
+		strcpy(selconn_Description, _("All computers must be connected to the internet."));
 		players = MAX_PLRS;
 		break;
 	case SELCONN_LOOPBACK:
-		strncpy(selconn_Description, _("Play by yourself with no network exposure."), sizeof(selconn_Description) - 1);
+		strcpy(selconn_Description, _("Play by yourself with no network exposure."));
 		players = 1;
 		break;
 	}
 
-	strncpy(selconn_MaxPlayers, fmt::format(_("Players Supported: {:d}"), players).c_str(), sizeof(selconn_MaxPlayers));
-	WordWrapString(selconn_Description, DESCRIPTION_WIDTH);
+	strcpy(selconn_MaxPlayers, fmt::format(_("Players Supported: {:d}"), players).c_str());
+	strcpy(selconn_Description, WordWrapString(selconn_Description, DESCRIPTION_WIDTH).c_str());
 }
 
 void SelconnSelect(int value)

@@ -1,16 +1,17 @@
 #include "panels/charpanel.hpp"
 
-#include <fmt/format.h>
 #include <string>
+
+#include <fmt/format.h>
 
 #include "DiabloUI/art.h"
 #include "DiabloUI/art_draw.h"
-
 #include "control.h"
-#include "player.h"
-#include "utils/display.h"
 #include "engine/render/cel_render.hpp"
 #include "engine/render/text_render.hpp"
+#include "panels/ui_panels.hpp"
+#include "player.h"
+#include "utils/display.h"
 #include "utils/language.h"
 
 namespace devilution {
@@ -32,6 +33,7 @@ namespace {
 struct StyledText {
 	UiFlags style;
 	std::string text;
+	int spacing = 1;
 };
 
 struct PanelEntry {
@@ -105,10 +107,19 @@ StyledText GetResistInfo(int8_t resist)
 	else if (resist >= MAXRESIST)
 		style = UiFlags::ColorWhitegold;
 
-	return {
-		style, (resist >= MAXRESIST ? _("MAX") : fmt::format("{:d}%", resist))
-	};
+	return { style, fmt::format("{:d}%", resist) };
 }
+
+constexpr int LeftColumnLabelX = 88;
+constexpr int TopRightLabelX = 211;
+constexpr int RightColumnLabelX = 253;
+
+constexpr int LeftColumnLabelWidth = 76;
+constexpr int RightColumnLabelWidth = 68;
+
+// Indices in `panelEntries`.
+constexpr unsigned AttributeHeaderEntryIndices[2] = { 5, 6 };
+constexpr unsigned GoldHeaderEntryIndex = 16;
 
 PanelEntry panelEntries[] = {
 	{ "", { 9, 14 }, 150, 0,
@@ -118,67 +129,67 @@ PanelEntry panelEntries[] = {
 
 	{ N_("Level"), { 57, 52 }, 57, 45,
 	    []() { return StyledText { UiFlags::ColorWhite, fmt::format("{:d}", MyPlayer->_pLevel) }; } },
-	{ N_("Experience"), { 211, 52 }, 99, 91,
+	{ N_("Experience"), { TopRightLabelX, 52 }, 99, 91,
 	    []() { return StyledText { UiFlags::ColorWhite, fmt::format("{:d}", MyPlayer->_pExperience) }; } },
-	{ N_("Next level"), { 211, 80 }, 99, 198,
+	{ N_("Next level"), { TopRightLabelX, 80 }, 99, 198,
 	    []() {
-	        if (MyPlayer->_pLevel == MAXCHARLEVEL - 1) {
+	        if (MyPlayer->_pLevel == MAXCHARLEVEL) {
 		        return StyledText { UiFlags::ColorWhitegold, _("None") };
-	        } else {
-		        return StyledText { UiFlags::ColorWhite, fmt::format("{:d}", MyPlayer->_pNextExper) };
 	        }
+	        return StyledText { UiFlags::ColorWhite, fmt::format("{:d}", MyPlayer->_pNextExper) };
 	    } },
 
-	{ N_("Base"), { 88, 115 }, 0, 44 },
-	{ N_("Now"), { 135, 115 }, 0, 44 },
-	{ N_("Strength"), { 88, 135 }, 45, 76,
+	{ N_("Base"), { LeftColumnLabelX, /* set dynamically */ 0 }, 0, 44 },
+	{ N_("Now"), { 135, /* set dynamically */ 0 }, 0, 44 },
+	{ N_("Strength"), { LeftColumnLabelX, 135 }, 45, LeftColumnLabelWidth,
 	    []() { return StyledText { GetBaseStatColor(CharacterAttribute::Strength), fmt::format("{:d}", MyPlayer->_pBaseStr) }; } },
 	{ "", { 135, 135 }, 45, 0,
 	    []() { return StyledText { GetCurrentStatColor(CharacterAttribute::Strength), fmt::format("{:d}", MyPlayer->_pStrength) }; } },
-	{ N_("Magic"), { 88, 163 }, 45, 76,
+	{ N_("Magic"), { LeftColumnLabelX, 163 }, 45, LeftColumnLabelWidth,
 	    []() { return StyledText { GetBaseStatColor(CharacterAttribute::Magic), fmt::format("{:d}", MyPlayer->_pBaseMag) }; } },
 	{ "", { 135, 163 }, 45, 0,
 	    []() { return StyledText { GetCurrentStatColor(CharacterAttribute::Magic), fmt::format("{:d}", MyPlayer->_pMagic) }; } },
-	{ N_("Dexterity"), { 88, 191 }, 45, 76, []() { return StyledText { GetBaseStatColor(CharacterAttribute::Dexterity), fmt::format("{:d}", MyPlayer->_pBaseDex) }; } },
+	{ N_("Dexterity"), { LeftColumnLabelX, 191 }, 45, LeftColumnLabelWidth, []() { return StyledText { GetBaseStatColor(CharacterAttribute::Dexterity), fmt::format("{:d}", MyPlayer->_pBaseDex) }; } },
 	{ "", { 135, 191 }, 45, 0,
 	    []() { return StyledText { GetCurrentStatColor(CharacterAttribute::Dexterity), fmt::format("{:d}", MyPlayer->_pDexterity) }; } },
-	{ N_("Vitality"), { 88, 219 }, 45, 76, []() { return StyledText { GetBaseStatColor(CharacterAttribute::Vitality), fmt::format("{:d}", MyPlayer->_pBaseVit) }; } },
+	{ N_("Vitality"), { LeftColumnLabelX, 219 }, 45, LeftColumnLabelWidth, []() { return StyledText { GetBaseStatColor(CharacterAttribute::Vitality), fmt::format("{:d}", MyPlayer->_pBaseVit) }; } },
 	{ "", { 135, 219 }, 45, 0,
 	    []() { return StyledText { GetCurrentStatColor(CharacterAttribute::Vitality), fmt::format("{:d}", MyPlayer->_pVitality) }; } },
-	{ N_("Points to distribute"), { 88, 248 }, 45, 76,
+	{ N_("Points to distribute"), { LeftColumnLabelX, 248 }, 45, LeftColumnLabelWidth,
 	    []() {
 	        MyPlayer->_pStatPts = std::min(CalcStatDiff(*MyPlayer), MyPlayer->_pStatPts);
 	        return StyledText { UiFlags::ColorRed, (MyPlayer->_pStatPts > 0 ? fmt::format("{:d}", MyPlayer->_pStatPts) : "") };
 	    } },
 
-	{ N_("Gold"), { 211, 107 }, 0, 98 },
-	{ "", { 211, 127 }, 99, 0,
+	{ N_("Gold"), { TopRightLabelX, /* set dynamically */ 0 }, 0, 98 },
+	{ "", { TopRightLabelX, 127 }, 99, 0,
 	    []() { return StyledText { UiFlags::ColorWhite, fmt::format("{:d}", MyPlayer->_pGold) }; } },
 
-	{ N_("Armor class"), { 253, 163 }, 57, 67,
+	{ N_("Armor class"), { RightColumnLabelX, 163 }, 57, RightColumnLabelWidth,
 	    []() { return StyledText { GetValueColor(MyPlayer->_pIBonusAC), fmt::format("{:d}", MyPlayer->GetArmor()) }; } },
-	{ N_("To hit"), { 253, 191 }, 57, 67,
+	{ N_("To hit"), { RightColumnLabelX, 191 }, 57, RightColumnLabelWidth,
 	    []() { return StyledText { GetValueColor(MyPlayer->_pIBonusToHit), fmt::format("{:d}%", (MyPlayer->InvBody[INVLOC_HAND_LEFT]._itype == ItemType::Bow ? MyPlayer->GetRangedToHit() : MyPlayer->GetMeleeToHit())) }; } },
-	{ N_("Damage"), { 253, 219 }, 57, 67,
+	{ N_("Damage"), { RightColumnLabelX, 219 }, 57, RightColumnLabelWidth,
 	    []() {
 	        std::pair<int, int> dmg = GetDamage();
-	        return StyledText { GetValueColor(MyPlayer->_pIBonusDam), fmt::format("{:d}-{:d}", dmg.first, dmg.second) };
+	        int spacing = ((dmg.first >= 100) ? -1 : 1);
+	        return StyledText { GetValueColor(MyPlayer->_pIBonusDam), fmt::format("{:d}-{:d}", dmg.first, dmg.second), spacing };
 	    } },
 
-	{ N_("Life"), { 88, 284 }, 45, 76,
+	{ N_("Life"), { LeftColumnLabelX, 284 }, 45, LeftColumnLabelWidth,
 	    []() { return StyledText { GetMaxHealthColor(), fmt::format("{:d}", MyPlayer->_pMaxHP >> 6) }; } },
 	{ "", { 135, 284 }, 45, 0,
 	    []() { return StyledText { (MyPlayer->_pHitPoints != MyPlayer->_pMaxHP ? UiFlags::ColorRed : GetMaxHealthColor()), fmt::format("{:d}", MyPlayer->_pHitPoints >> 6) }; } },
-	{ N_("Mana"), { 88, 312 }, 45, 76,
+	{ N_("Mana"), { LeftColumnLabelX, 312 }, 45, LeftColumnLabelWidth,
 	    []() { return StyledText { GetMaxManaColor(), fmt::format("{:d}", MyPlayer->_pMaxMana >> 6) }; } },
 	{ "", { 135, 312 }, 45, 0,
 	    []() { return StyledText { (MyPlayer->_pMana != MyPlayer->_pMaxMana ? UiFlags::ColorRed : GetMaxManaColor()), fmt::format("{:d}", MyPlayer->_pMana >> 6) }; } },
 
-	{ N_("Resist magic"), { 253, 256 }, 57, 67,
+	{ N_("Resist magic"), { RightColumnLabelX, 256 }, 57, RightColumnLabelWidth,
 	    []() { return GetResistInfo(MyPlayer->_pMagResist); } },
-	{ N_("Resist fire"), { 253, 284 }, 57, 67,
+	{ N_("Resist fire"), { RightColumnLabelX, 284 }, 57, RightColumnLabelWidth,
 	    []() { return GetResistInfo(MyPlayer->_pFireResist); } },
-	{ N_("Resist lightning"), { 253, 313 }, 57, 67,
+	{ N_("Resist lightning"), { RightColumnLabelX, 313 }, 57, RightColumnLabelWidth,
 	    []() { return GetResistInfo(MyPlayer->_pLghtResist); } },
 };
 
@@ -186,6 +197,11 @@ Art PanelBoxLeft;
 Art PanelBoxMiddle;
 Art PanelBoxRight;
 Art PanelFull;
+
+constexpr int PanelFieldHeight = 24;
+constexpr int PanelFieldPaddingTop = 3;
+constexpr int PanelFieldPaddingBottom = 3;
+constexpr int PanelFieldInnerHeight = PanelFieldHeight - PanelFieldPaddingTop - PanelFieldPaddingBottom;
 
 void DrawPanelField(const Surface &out, Point pos, int len)
 {
@@ -199,16 +215,19 @@ void DrawPanelField(const Surface &out, Point pos, int len)
 
 void DrawShadowString(const Surface &out, const PanelEntry &entry)
 {
-	if (entry.label == "")
+	if (entry.label.empty())
 		return;
 
-	std::string text_tmp = _(entry.label.c_str());
-	char buffer[64];
-	int spacing = 0;
-	strcpy(buffer, text_tmp.c_str());
-	if (entry.labelLength > 0)
-		WordWrapString(buffer, entry.labelLength, GameFont12, spacing);
-	std::string text(buffer);
+	constexpr int Spacing = 0;
+	const std::string &textStr = LanguageTranslate(entry.label.c_str());
+	string_view text;
+	std::string wrapped;
+	if (entry.labelLength > 0) {
+		wrapped = WordWrapString(textStr, entry.labelLength, GameFont12, Spacing);
+		text = wrapped;
+	} else {
+		text = textStr;
+	}
 
 	UiFlags style = UiFlags::VerticalCenter;
 
@@ -218,11 +237,11 @@ void DrawShadowString(const Surface &out, const PanelEntry &entry)
 		style |= UiFlags::AlignCenter;
 	} else {
 		style |= UiFlags::AlignRight;
-		labelPosition += Displacement { -entry.labelLength - 3, 0 };
+		labelPosition += Displacement { -entry.labelLength - (IsSmallFontTall() ? 2 : 3), 0 };
 	}
 
-	DrawString(out, text, { labelPosition + Displacement { -2, 2 }, { entry.labelLength, 20 } }, style | UiFlags::ColorBlack, spacing, 10);
-	DrawString(out, text, { labelPosition, { entry.labelLength, 20 } }, style | UiFlags::ColorWhite, spacing, 10);
+	DrawString(out, text, { labelPosition + Displacement { -2, 2 }, { entry.labelLength, PanelFieldHeight } }, style | UiFlags::ColorBlack, Spacing);
+	DrawString(out, text, { labelPosition, { entry.labelLength, PanelFieldHeight } }, style | UiFlags::ColorWhite, Spacing);
 }
 
 void DrawStatButtons(const Surface &out)
@@ -251,6 +270,13 @@ void LoadCharPanel()
 
 	const Surface out(PanelFull.surface.get());
 
+	const bool isSmallFontTall = IsSmallFontTall();
+	const int attributeHeadersY = isSmallFontTall ? 112 : 114;
+	for (unsigned i : AttributeHeaderEntryIndices) {
+		panelEntries[i].position.y = attributeHeadersY;
+	}
+	panelEntries[GoldHeaderEntryIndex].position.y = isSmallFontTall ? 105 : 106;
+
 	for (auto &entry : panelEntries) {
 		if (entry.statDisplayFunc != nullptr) {
 			DrawPanelField(out, entry.position, entry.length);
@@ -277,9 +303,9 @@ void DrawChr(const Surface &out)
 			StyledText tmp = entry.statDisplayFunc();
 			DrawString(
 			    out,
-			    tmp.text.c_str(),
-			    { entry.position + Displacement { pos.x, pos.y }, { entry.length, 27 } },
-			    UiFlags::AlignCenter | UiFlags::VerticalCenter | tmp.style);
+			    tmp.text,
+			    { entry.position + Displacement { pos.x, pos.y + PanelFieldPaddingTop }, { entry.length, PanelFieldInnerHeight } },
+			    UiFlags::AlignCenter | UiFlags::VerticalCenter | tmp.style, tmp.spacing);
 		}
 	}
 	DrawStatButtons(out);

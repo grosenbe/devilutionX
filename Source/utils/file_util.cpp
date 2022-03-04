@@ -17,8 +17,8 @@
 // Suppress definitions of `min` and `max` macros by <windows.h>:
 #define NOMINMAX 1
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include <shlwapi.h>
+#include <windows.h>
 
 #include "utils/log.hpp"
 #endif
@@ -54,7 +54,7 @@ bool FileExists(const char *path)
 		return false;
 	}
 	if (!::PathFileExistsW(&pathUtf16[0])) {
-		if (::GetLastError() == ERROR_FILE_NOT_FOUND) {
+		if (::GetLastError() == ERROR_FILE_NOT_FOUND || ::GetLastError() == ERROR_PATH_NOT_FOUND) {
 			::SetLastError(ERROR_SUCCESS);
 		} else {
 			LogError("PathFileExistsW: error code {}", ::GetLastError());
