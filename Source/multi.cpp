@@ -477,7 +477,7 @@ void InitGameInfo()
 	sgGameInitInfo.bTheoQuest = *sgOptions.Gameplay.theoQuest ? 1 : 0;
 	sgGameInitInfo.bCowQuest = *sgOptions.Gameplay.cowQuest ? 1 : 0;
 	sgGameInitInfo.bFriendlyFire = *sgOptions.Gameplay.friendlyFire ? 1 : 0;
-	sgGameInitInfo.bSharedExperience = sgOptions.Gameplay.bSharedExperience ? 1 : 0;
+	sgGameInitInfo.bSharedExperience = *sgOptions.Gameplay.sharedExperience ? 1 : 0;
 }
 
 void NetSendLoPri(int playerId, const byte *data, size_t size)
